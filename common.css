@@ -1,0 +1,475 @@
+/* Application shell, navigation.. */
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Mono:wght@400;700&display=swap');
+
+:root {
+    --bg: #f6f7f9;
+    --radius: 12px;
+    --pomodoro-break: #d65353;
+    --card: rgba(20, 20, 20, .35);
+    --text: #f7f9fb;
+    --muted: rgba(255, 255, 255, .78);
+    --line: rgba(255, 255, 255, .15);
+    --glass-pane: rgba(20, 20, 20, .35);
+    --glass-inset: rgba(20, 20, 20, .22);
+    --glass-border: rgba(255, 255, 255, .15);
+    --glass-blur: blur(7px) saturate(200%)
+}
+
+* {
+    box-sizing: border-box
+}
+
+body {
+    margin: 0;
+    background-color: var(--bg);
+    background-image: url("images/bg.jpg");
+    background-position: center;
+    background-size: cover;
+    background-repeat: no-repeat;
+    background-attachment: fixed;
+    color: var(--text);
+    font: 15px/1.4 'DM Sans', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif
+}
+
+
+h1 {
+    font-size: 27px;
+    margin: 0;
+    letter-spacing: -.7px
+}
+
+
+button {
+    font: inherit;
+    border: 0;
+    cursor: pointer
+}
+
+.brand {
+    margin-left: 5px
+}
+
+.upper-bar-left .brand-title {
+    margin: 0;
+    font-size: 2px;
+    font-weight: 700;
+    height: 38px;
+    letter-spacing: -.5px;
+    color: var(--text);
+    white-space: nowrap;
+}
+
+.page-selector {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    height: 40px;
+    padding: 4px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+    box-sizing: border-box;
+    pointer-events: auto;
+    box-shadow: 
+        inset 0 1px 0 rgba(255, 255, 255, 0.12),
+        0 0 16px rgba(255, 255, 255, 0.15),
+        0 10px 28px rgba(0, 0, 0, .16);
+}
+
+.page-nav-button {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: auto;
+    height: 32px; /* Fits perfectly inside the 40px container */
+    min-height: auto; /* OVERRIDES the global 44px min-height conflict! */
+    margin: 0;
+    padding: 0 20px;
+    border-radius: 9px;
+    background: transparent;
+    color: var(--muted);
+    font-weight: 500;
+    box-sizing: border-box;
+    pointer-events: auto;
+    transition: background-color .2s ease, color .2s ease;
+}
+
+.page-nav-button span {
+    display: inline-block !important;
+}
+
+.page-nav-button svg {
+    flex: none;
+    width: 19px;
+    height: 19px
+}
+
+.page-nav-button.is-active {
+    font-weight: 600
+}
+
+.page-content {
+    min-width: 0;
+    margin-top: 100px;
+    margin-right: 32px;
+    margin-left: 32px;    
+}
+
+.page-view[hidden] {
+    display: none
+}
+
+.upper-bar {
+    position: fixed;
+    inset: 20px 32px auto 32px;
+    z-index: 30;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 44px;
+    pointer-events: none
+}
+
+.upper-bar-right-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    pointer-events: auto;
+}
+
+.lower-bar-left,
+.lower-bar-right,
+.upper-bar-left,
+.upper-bar-right {
+    display: flex;
+    align-items: flex-end;
+    gap: 7px;
+    pointer-events: auto
+}
+
+.ui-button,
+.ui-control {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius);
+    background-color: var(--glass-inset);
+    background-image: none;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    color: var(--text);
+    font: 500 13px/1 'DM Sans', system-ui, sans-serif;
+    cursor: pointer;
+    text-decoration: none;
+    box-shadow: 
+        inset 0 1px 0 rgba(255, 255, 255, 0.25),
+        0 0 14px rgba(255, 255, 255, 0.18),
+        0 8px 24px rgba(0, 0, 0, 0.3);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    transition: background-color .2s ease, border-color .2s ease, box-shadow .2s ease, color .2s ease;
+}
+
+.ui-button:hover,
+.ui-control:hover {
+    border-color: rgba(255, 255, 255, 0.5);
+    box-shadow: 
+        inset 0 1px 0 rgba(255, 255, 255, 0.35),
+        0 0 18px rgba(255, 255, 255, 0.3);
+}
+
+.ui-button {
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
+    min-height: 40px;
+    padding: 0;
+    font-size: 19px;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    box-shadow: 
+        inset 0 1px 0 rgba(255, 255, 255, 0.25),
+        0 0 14px rgba(255, 255, 255, 0.18),
+        0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+.ui-button img {
+    width: 17px;
+    height: 17px;
+}
+
+.ui-control {
+    height: 32px; /* Reduced from 40px */
+    padding: 0 12px; /* Reduced from 16px */
+    gap: 6px;
+}
+
+select.ui-control:not(.no-arrow) {
+    appearance: none;
+    padding-right: 28px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23f7f9fb' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 8px center; /* Moved left to match smaller padding */
+    background-size: 12px; /* Smaller arrow */
+    cursor: pointer;
+    outline: none;
+}
+
+label.ui-control {
+    cursor: pointer;
+    user-select: none;
+}
+
+label.ui-control input[type="checkbox"] {
+    margin: 0;
+    cursor: pointer;
+    accent-color: var(--text);
+}
+
+
+.toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px
+}
+
+
+:is(.pomodoro-settings input, .brain-dump textarea, .category-color, .remove-category, .background-choice-no-image) {
+    background-color: var(--glass-inset);
+    background-image: none;
+    border-color: var(--glass-border);
+    color: var(--text);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 3px 10px rgba(0, 0, 0, .1);
+}
+
+
+
+
+
+
+
+
+
+.brain-dump.is-open {
+    box-shadow: 0 18px 42px rgba(17, 17, 17, 0.18)
+}
+
+body[data-focus-session="active"] .focus-task-area:not([hidden]) {
+    display: none
+}
+
+
+
+
+
+
+
+
+
+
+.panel,
+.task-area {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+}
+
+.panel {
+    padding: 14px;
+    height: max-content;
+}
+
+.panel-title {
+    font-size: 16px;
+    margin: 0;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+/* ------------------------------------------------- scrollbar stuff ------------------------------------------------------ */
+
+html {
+    overflow-y: scroll; /* Forces scrollbar track to always stay present, preventing layout jumps */
+    overflow-x: scroll;
+    scrollbar-width: none;
+}
+
+::-webkit-scrollbar {
+    width: 0px;
+    height: 0px;
+    display:none;
+}
+
+* {
+    scrollbar-width: none; /* Firefox for all elements */
+}
+
+*::-webkit-scrollbar {
+    display: none; /* Chrome, Edge, Safari for all elements */
+}
+
+
+
+
+
+
+
+.empty {
+    padding: 55px 10px;
+    text-align: center;
+    color: var(--muted);
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    flex: 1;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/* ----------------------------------------------- GLASS STUFF ---------------------------------------------- clear needed */
+
+:is(.panel, .task-area, .box, .page-selector) {
+    background-color: var(--glass-pane);
+    background-image: none;
+    border: 1px solid var(--glass-border);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08), 0 10px 28px rgba(0, 0, 0, .16);
+}
+
+/* Glass Insets & Component Rows */
+:is(.task, .task-details, .category-editor, .timeline-event, .background-choice, .category-row) {
+    background-color: var(--glass-pane);
+    background-image: none;
+    border-color: var(--glass-border);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 4px 14px rgba(0, 0, 0, .12);
+}
+
+
+/* Cinematic Background Vignette Overlay */
+body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: -1;
+    background: radial-gradient(circle at center, transparent 35%, rgba(0, 0, 0, 0.75) 100%);
+}
+
+.ui-button:hover {
+    border-color: rgba(255, 255, 255, 0.5);
+    box-shadow: 
+        inset 0 1px 0 rgba(255, 255, 255, 0.35),
+        0 0 18px rgba(255, 255, 255, 0.3);
+}
+
+.page-nav-button:hover,
+.page-nav-button.is-active {
+    background-color: rgba(255, 255, 255, .12);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .12), 0 3px 10px rgba(0, 0, 0, .12);
+}
+
+.background-choices {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+}
+
+.background-choice {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 3px;
+    padding: 3px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--card);
+    color: var(--text);
+    text-align: left;
+}
+
+.background-choice img {
+    display: block;
+    width: 100%;
+    aspect-ratio: 16/9;
+    object-fit: cover;
+    border-radius: var(--radius);
+}
+
+.background-choice-no-image {
+    display: block;
+    width: 100%;
+    aspect-ratio: 4/3;
+    border: 1px dashed var(--line);
+    border-radius: var(--radius);
+    background: var(--bg);
+}
+
+.background-choice span {
+    overflow: hidden;
+    font-size: 10px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+
+.timeline-event {
+    background-color: color-mix(in srgb, var(--event-color) 82%, rgba(20, 20, 20, .25));
+    color: #fff;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, .55);
+}
+
+
+/* Interactive Elements & Fields Glass */
+:is(.ui-button, .ui-control, .pomodoro-settings input, .brain-dump textarea, .category-color, .remove-category, .background-choice-no-image) {
+    background-color: var(--glass-inset);
+    background-image: none;
+    border-color: var(--glass-border);
+    color: var(--text);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 3px 10px rgba(0, 0, 0, .1);
+}
+
+/* Clock Panel Transparent Reset */
+.clock-panel {
+    background: transparent;
+    border-color: transparent;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    box-shadow: none;
+}

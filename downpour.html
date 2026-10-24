@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Downpour</title>
+  <link rel="stylesheet" href="settings.css">
+  <link rel="stylesheet" href="common.css">
+  <link rel="stylesheet" href="responsive.css">
+  <link rel="stylesheet" href="page-focus.css">
+  <link rel="stylesheet" href="page-tasksandsomefocus.css">
+  <link rel="stylesheet" href="page-analytics.css">
+</head>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<body data-page="focus">
+
+
+
+  <header class="upper-bar">
+      <div class="upper-bar-left">
+        <h1 class="BrandTitle">downpour</h1>
+      </div>
+      
+      <div class="page-selector">
+        <button class="page-nav-button is-active" type="button" data-page="focus" aria-current="page" title="Focus">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+            <line x1="10" x2="14" y1="2" y2="2"></line>
+            <line x1="12" x2="15" y1="14" y2="11"></line>
+            <circle cx="12" cy="14" r="8"></circle>
+          </svg>
+          <span>Focus</span>
+        </button>
+        <button class="page-nav-button" type="button" data-page="analytics" title="Analytics">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M4 19V5m0 14h17M8 15l3-4 3 2 5-7" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"></path>
+          </svg>
+          <span>Analytics</span>
+        </button>
+        <button class="page-nav-button" type="button" data-page="tasks" title="Tasks">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+            <path d="M13 5h8M13 12h8M13 19h8M3 17l2 2 4-4"></path>
+            <rect x="3" y="4" width="6" height="6" rx="1"></rect>
+          </svg>
+          <span>Tasks</span>
+        </button>
+      </div>
+
+      <div class="upper-bar-right">
+        <button class="ui-button" id="settingsButton" type="button" aria-label="Open Settings" aria-pressed="false" title="Settings">
+          <img src="icons/settings.svg">
+        </button>
+      </div>
+    </header>
+        
+
+
+
+
+
+
+
+
+
+
+
+  <div class="page-content">
+    <section class="page-view focus-page" data-page-view="focus">
+
+      <section class="clock-panel" id="clockPanel" data-pomodoro-state="idle">
+        <div class="pomodoro-display" id="pomodoroDisplay" hidden>
+          <div class="pomodoro-phase" id="pomodoroPhase"></div>
+          <div class="pomodoro-gauge">
+            <svg
+              class="pomodoro-arc"
+              id="pomodoroProgress"
+              viewBox="0 0 140 140"
+              role="progressbar"
+              aria-label="Pomodoro phase progress"
+              aria-valuemin="0"
+              aria-valuemax="100"
+              aria-valuenow="0"
+            >
+              <circle
+                class="pomodoro-arc-track"
+                cx="70"
+                cy="70"
+                r="62"
+                pathLength="100"
+                aria-hidden="true"
+              ></circle>
+              <circle
+                class="pomodoro-arc-progress"
+                id="pomodoroProgressArc"
+                cx="70"
+                cy="70"
+                r="62"
+                pathLength="100"
+                stroke-dasharray="100"
+                stroke-dashoffset="100"
+                aria-hidden="true"
+              ></circle>
+            </svg>
+          </div>
+          <div class="pomodoro-actions">
+            <button class="ui-control skip-break" id="skipBreak" type="button" hidden>Skip break</button>
+            <button class="ui-button pomodoro-reset" id="pomodoroReset" type="button" title="Reset Pomodoro" aria-label="Reset Pomodoro">
+              <img src="icons/rotate-cw.svg">
+            </button>
+          </div>
+        </div>
+        <div class="clock-display">
+          <div class="clock" id="clock">00:00</div>
+          <div class="date clock-date" id="date"></div>
+        </div>
+        <div class="live-time" id="liveTime" aria-label="Current time" hidden></div>
+      </section>
+
+      <section class="task-area focus-task-area" id="focusTasksPanel">
+        <div class="toolbar">
+          <h2 class="panel-title">Today's tasks</h2>  
+          <select class="ui-control" id="focusCategoryFilter" aria-label="Filter today's tasks by category"></select>
+        </div>
+        <div class="tasks" id="focusTasks"></div>
+        <div class="task-add-row">
+          <button class="ui-control" id="focusAddTask" type="button">+ Task</button>
+        </div>
+      </section>
+      
+      <div class="lower-bar">
+        <div class="lower-bar-left">
+          <section class="brain-dump" id="brainDumpPanel" aria-live="polite">
+            <button class="ui-button" id="brainDumpToggle" type="button" aria-label="Open brain dump" aria-expanded="false" aria-controls="brainDump" title="Brain Dump">
+              <img src="icons/notebook-pen.svg">
+            </button>
+            <div class="brain-dump-content">
+              <div class="brain-dump-header">
+                <div class="panel-title">Brain dump</div>
+                <button class="brain-dump-close" id="brainDumpClose" type="button" aria-label="Close brain dump" title="Collapse brain dump">×</button>
+              </div>
+              <textarea id="brainDump" placeholder="Write anything on your mind..."></textarea>
+            </div>
+          </section>
+          <section class="focus-music" id="focusMusicPanel" aria-live="polite">
+            <button class="ui-button" id="focusMusicToggle" type="button" aria-label="Open music panel" aria-expanded="false" aria-controls="focusMusic" title="Focus Music">
+              <img src="icons/music-4.svg">
+            </button>
+          </section>
+        </div>
+
+        <div class="focus-now-widget" id="focusNowWidget" aria-live="polite" hidden>
+          <div class="focus-now-task" id="focusNowTask"></div>
+        </div>
+
+        <div class="lower-bar-right">
+          <button class="ui-button" id="pomodoroPipButton" type="button" aria-label="Enter picture in picture" aria-pressed="false" title="Mini-Viewer">
+            <img src="icons/picture-in-picture.svg">
+          </button>
+          <button class="ui-button" id="fullscreenButton" type="button" aria-label="Enter full screen" aria-pressed="false">
+            <img src="icons/maximize-2.svg">
+          </button>
+        </div>
+
+      </div>
+    </section>
+
+    <section class="page-view" id="tasksPage" data-page-view="tasks" hidden>
+
+      <section class="task-planner panel" id="taskPlanner" aria-labelledby="taskPlannerMonth">
+        <div class="task-planner-heading">
+          <div>
+            <h2 class="panel-title" id="taskPlannerMonth"></h2>
+            <p>Drag tasks onto a date to reschedule them.</p>
+          </div>
+          <div class="task-selected-date" id="taskSelectedDate" aria-live="polite"></div>
+          <div class="task-planner-navigation">
+            <button class="ui-button" type="button" data-month-offset="-1" aria-label="Previous month">
+              <img src="icons/chevron-left.svg">
+            </button>
+            <button class="ui-button" type="button" data-month-offset="1" aria-label="Next month">
+              <img src="icons/chevron-right.svg">
+            </button>
+          </div>
+        </div>
+        <div class="task-planner-weekdays" aria-hidden="true">
+          <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
+        </div>
+        <div class="task-planner-grid" id="taskPlannerGrid" aria-label="Task calendar"></div>
+      </section>
+      
+      <section class="task-area">
+        <div class="toolbar">
+          <div class="task-heading">
+            <h2 class="panel-title">Tasks</h2>
+          </div>
+          <div class="toolbar-actions">
+            <div class="category-management">
+              <button class="ui-control" id="addCat">+ New category</button>
+              <button class="ui-button" id="editCategories" type="button" title="Edit categories" aria-label="Edit categories">
+                <img src="icons/pencil.svg">
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="task-filters">
+          <select class="ui-control" id="categoryFilter" aria-label="Filter tasks by category"></select>
+          <label class="ui-control">
+            <input type="checkbox" id="hideCompletedToggle">
+            <span>Hide completed</span>
+          </label>
+        </div>
+
+        <div class="category-editor" id="categoryEditor" hidden></div>
+        <div class="tasks" id="tasks"></div>
+
+        <div class="task-add-row">
+          <button class="ui-control" id="addTask">+ Task</button>
+        </div>
+      </section>
+      
+    </section>
+
+    <section class="page-view analytics-page" data-page-view="analytics" hidden>
+      <section class="panel" id="focusActivity">
+        <div class="activity-heading toolbar">
+          <h2 class="panel-title">Focus activity</h2>
+          <label class="activity-year-control">
+            <span>Year</span>
+            <select class="ui-control" id="activityYear" aria-label="Focus activity year"></select>
+          </label>
+        </div>
+        <div class="activity-scroll" aria-label="Focus activity by day">
+          <div class="activity-calendar">
+            <div class="activity-months" id="activityMonths" aria-hidden="true"></div>
+            <div class="activity-chart">
+              <div class="activity-weekdays" aria-hidden="true"><span>Mon</span><span>Wed</span><span>Fri</span></div>
+              <div class="activity-grid" id="activityGrid" role="group" aria-label="Daily focus activity"></div>
+            </div>
+          </div>
+        </div>
+        <div class="activity-legend" aria-label="Focus time intensity">
+          <span>Less</span>
+          <span class="activity-cell" data-level="0" aria-hidden="true"></span>
+          <span class="activity-cell" data-level="1" aria-hidden="true"></span>
+          <span class="activity-cell" data-level="2" aria-hidden="true"></span>
+          <span class="activity-cell" data-level="3" aria-hidden="true"></span>
+          <span class="activity-cell" data-level="4" aria-hidden="true"></span>
+          <span>More</span>
+        </div>
+      </section>
+      <section class="focus-trend panel" id="focusTrend">
+        <div class="focus-trend-heading toolbar">
+          <h2 class="panel-title">Focus trend</h2>
+          <label class="focus-trend-control">
+            <span>View</span>
+            <select id="activityTrendRange" class="ui-control" aria-label="Focus trend period">
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="monthly">Monthly</option>
+              <option value="yearly">Yearly</option>
+            </select>
+          </label>
+        </div>
+        <div id="activityTrendChart" class="focus-trend-chart" aria-live="polite"></div>
+      </section>
+      <section class="panel" id="timeLine" aria-labelledby="calendarTitle">
+        <div class="timeline-heading">
+          <h2 class="panel-title">Timeline</h2>
+          <div class="timeline-date" id="calendarDate"></div>
+        </div>
+        <div class="timeline-scroll" id="calendarScroll" aria-label="Scrollable task timeline">
+          <div class="timeline-grid" id="taskCalendar" aria-label="Task sessions on the selected date"></div>
+        </div>
+      </section>
+      <section class="panel" id="focusSummary">
+        <h2 class="panel-title">Focus Summary</h2>
+        <div class="focus-selected-date" id="focusSelectedDate"></div>
+        <div class="focus-total" id="focusTotal">0s</div>
+        <div class="focus-label">Total focus time</div>
+        <div id="focusProgress"></div>
+        <div class="focus-breakdown" id="focusBreakdown"></div>
+      </section>
+    </section>
+  </div>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  <!-- Settings Side Panel -->
+  <div class="settings-backdrop" id="settingsBackdrop"></div>
+  <aside class="settings-panel" id="settingsPanel">
+    <div class="settings-header">
+      <h2 id="settingsTitle">Settings</h2>
+      <button class="ui-button" id="closeSettings" type="button" aria-label="Close Settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 20px; height: 20px;">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
+    </div>
+    <div class="settings-page-content">
+      <section class="settings-section">
+        <h3>Background image</h3>
+        <div class="background-choices" id="backgroundChoices" role="group" aria-label="Choose background image"></div>
+      </section>
+      <section class="settings-section">
+        <h3>Pomodoro</h3>
+        <form class="pomodoro-settings" id="pomodoroSettings">
+          <label for="pomodoroFocusMinutes">
+            Focus · minutes
+            <input class="ui-control" id="pomodoroFocusMinutes" type="number" min="1" max="180" step="1" required>
+          </label>
+          <label for="pomodoroBreakMinutes">
+            Break · minutes
+            <input class="ui-control" id="pomodoroBreakMinutes" type="number" min="1" max="60" step="1" required>
+          </label>
+          <button class="ui-control" type="submit">Save times</button>
+        </form>
+      </section>
+    </div>
+  </aside>
+
+
+
+
+
+ <!-- Task Modal Container -->
+  <div id="taskModal" class="task-modal" hidden></div>
+
+
+
+
+
+
+
+  <!-- Visual effects -->
+  <svg class="glass-filter-defs" aria-hidden="true" focusable="false">
+    <defs>
+      <filter id="liquid-glass-refraction" x="-10%" y="-10%" width="120%" height="120%" color-interpolation-filters="sRGB">
+        <feTurbulence type="fractalNoise" baseFrequency=".018 .035" numOctaves="2" seed="8" result="map"></feTurbulence>
+        <feDisplacementMap in="SourceGraphic" in2="map" scale="-4" xChannelSelector="R" yChannelSelector="G" result="dispRed"></feDisplacementMap>
+        <feColorMatrix in="dispRed" type="matrix" values="1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0" result="red"></feColorMatrix>
+        <feDisplacementMap in="SourceGraphic" in2="map" scale="-6" xChannelSelector="R" yChannelSelector="G" result="dispGreen"></feDisplacementMap>
+        <feColorMatrix in="dispGreen" type="matrix" values="0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 1 0" result="green"></feColorMatrix>
+        <feDisplacementMap in="SourceGraphic" in2="map" scale="-8" xChannelSelector="R" yChannelSelector="G" result="dispBlue"></feDisplacementMap>
+        <feColorMatrix in="dispBlue" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 1 0" result="blue"></feColorMatrix>
+        <feBlend in="red" in2="green" mode="screen" result="rg"></feBlend>
+        <feBlend in="rg" in2="blue" mode="screen" result="output"></feBlend>
+        <feGaussianBlur in="output" stdDeviation=".25"></feGaussianBlur>
+      </filter>
+    </defs>
+  </svg>
+
+  <script src="app.js"></script>
+
+
+</body>
+</html>

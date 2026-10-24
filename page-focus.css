@@ -1,0 +1,417 @@
+/* ==========================================================================
+   Clock panel
+   --------------------------------------------------------------------------
+   The panel is a square "stage" and a size container. Everything inside is
+   sized in cqw (1% of the panel's width), so all elements keep exactly the
+   same relative size and position no matter how big the panel is.
+   Only the panel itself changes size (see --clock-panel-max and the width
+   rule below). Never use px / vw / vh for anything inside the stage.
+   ========================================================================== */
+
+.clock-panel {
+    /* The largest the panel may get. Shrinks further if the parent is narrower. */
+    --clock-panel-max: min(560px, 56vh);
+    position: relative;
+    flex: none;
+    width: min(100%, var(--clock-panel-max));
+    aspect-ratio: 1;
+    margin: clamp(12px, 3vh, 40px) auto;
+    padding: 0;
+    container-type: inline-size;
+    text-align: center;
+}
+
+/* In the picture-in-picture window the panel fills the largest square that fits. */
+body.is-pip .clock-panel {
+    --clock-panel-max: 100vmin;
+    margin: 0;
+}
+
+/* Every direct child of the stage defines 1 unit = 1% of the stage width. */
+.clock-panel > * {
+    font-size: 1cqw;
+}
+
+.clock-display {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+}
+
+.clock {
+    font-size: 24em;
+    font-family: Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: .04em;
+    font-variant-numeric: tabular-nums;
+    text-shadow: 
+        0 0.04em 0.08em rgba(0, 0, 0, 0.9), 
+        0 0.1em 0.2em rgba(0, 0, 0, 0.6);
+}
+
+.clock-date {
+    margin-top: .3em;
+    font-size: 5em;
+    line-height: 1.2;
+    white-space: nowrap;
+}
+
+.lower-bar-left,
+.lower-bar-right,
+.upper-bar-left,
+.upper-bar-right {
+    align-items: center
+}
+
+.focus-now-widget {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: min(480px, calc(100% - 160px));
+    height: 40px;
+    transform: translate(-50%, -50%);
+    color: var(--text);
+    pointer-events: auto;
+}
+
+.focus-now-caption {
+    position: absolute;
+    top: -18px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: var(--muted);
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+.focus-now-task {
+    width: 100%;
+    height: 100%;
+}
+
+.focus-now-task .task-row {
+    width: 100%;
+    height: 100%;
+    flex: 1;
+}
+
+.focus-now-task .task {
+    width: 100%;
+    height: 100%;
+    padding: 0 16px;
+    border-radius: var(--radius);
+}
+
+.focus-now-task .task-main {
+    align-items: center
+}
+
+.focus-now-task .task-actions {
+    flex: none;
+    gap: 4px
+}
+
+.focus-now-task .task-actions .ui-button,
+.focus-now-task .task-actions .ui-button.stop {
+    width: 28px;
+    min-width: 28px;
+    height: 28px;
+    min-height: 28px;
+    padding: 0
+}
+
+.focus-task-area {
+    grid-column: 1 / -1;
+    justify-self: center;
+    margin-top: 70px;
+    width: min(100%, 364px);
+}
+
+/* --- Pomodoro ring + controls (all measured in stage units) --------------- */
+
+.pomodoro-display {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+}
+
+.pomodoro-display[hidden] {
+    display: none
+}
+
+.pomodoro-phase {
+    position: absolute;
+    top: 21%;
+    left: 0;
+    right: 0;
+    transform: none;
+    font-size: 4.6em;
+    line-height: 1.2;
+    text-align: center;
+    white-space: nowrap;
+    color: #fff;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.8);
+}
+
+.pomodoro-gauge {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    pointer-events: none;
+    z-index: -1;
+}
+
+.pomodoro-arc {
+    display: block;
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+    transform: rotate(-90deg);
+    position: relative;
+    z-index: 0;
+}
+
+.pomodoro-arc-track,
+.pomodoro-arc-progress {
+    fill: none;
+    stroke-width: 4;
+    stroke-linecap: round
+}
+
+.pomodoro-arc-track {
+    stroke: rgba(255, 255, 255, 0.45); /* Increased contrast */
+    filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.35));
+}
+
+.pomodoro-arc-progress {
+    stroke: #00ff84;
+    transition: stroke-dashoffset .4s linear;
+    filter: drop-shadow(0 0 3px #28a86b) drop-shadow(0 0 10px rgba(40, 168, 107, 0.6));
+}
+
+.pomodoro-arc-progress[data-phase="break"] {
+    stroke: #db4f50;
+    /* Soft red glow */
+    filter: drop-shadow(0 0 3px #db4f50) drop-shadow(0 0 10px rgba(219, 79, 80, 0.6));
+}
+
+.pomodoro-actions {
+    position: absolute;
+    bottom: 11%;
+    left: 0;
+    right: 0;
+    transform: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1.5em;
+    pointer-events: auto;
+}
+
+.pomodoro-actions .skip-break[hidden] {
+    display: none
+}
+
+.pomodoro-actions .pomodoro-reset {
+    width: 9em;
+    height: 9em;
+    min-width: 0;
+    min-height: 0;
+    border-radius: var(--radius); /* confirm */
+    font-size: 1em;
+}
+
+.pomodoro-actions .pomodoro-reset img {
+    width: 4.4em;
+    height: 4.4em;
+}
+
+.pomodoro-actions .skip-break {
+    margin: 0;
+    max-width: none;
+    min-height: 0;
+    padding: .5em 1em;
+    border-radius: var(--radius); /* confirm */
+    font-size: 3.6em;
+    line-height: 1.2;
+    white-space: nowrap;
+}
+
+.clock-panel[data-pomodoro-state="running"] .clock-date {
+    visibility: hidden
+}
+
+.clock-panel[data-pomodoro-state="paused"] .clock-date {
+    visibility: visible
+}
+
+.live-time,
+.clock-panel:is([data-pomodoro-state="running"], [data-pomodoro-state="paused"]) .live-time {
+    display: none !important;
+}
+
+.lower-bar {
+    position: fixed;
+    inset: auto 32px 32px 32px;
+    z-index: 30;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 44px;
+    pointer-events: none
+}
+
+.pomodoro-arc-progress[data-phase="break"] {
+    stroke: var(--pomodoro-break)
+}
+
+.pomodoro-settings {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-top: 14px;
+    padding-top: 13px;
+    border-top: 1px solid var(--line)
+}
+
+.pomodoro-settings label {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    color: var(--muted);
+    font-size: 11px
+}
+
+.pomodoro-settings input {
+    width: 100%;
+    min-width: 0;
+    padding: 8px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: #fff;
+    color: var(--text);
+    font: inherit
+}
+
+.pomodoro-settings button {
+    grid-column: 1/-1;
+    justify-self: end
+}
+
+.skip-break {
+    margin: 0
+}
+
+.skip-break[hidden] {
+    display: none
+}
+
+#brainDump {
+    background: transparent;
+    background-color: transparent;
+    backdrop-filter: none; 
+    box-shadow: none;  
+    border: none;
+}
+
+.brain-dump {
+    position: relative; /* Acts as the anchor point for the floating panel */
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    width: auto;
+    height: auto;
+    padding: 0;
+    border: none;
+    box-shadow: none;
+    flex: none;
+}
+
+.brain-dump.is-open {
+    /* Keeps the parent wrapper compact so it doesn't take up layout space */
+    display: inline-flex;
+    width: auto;
+    height: auto;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+}
+
+.brain-dump-content {
+    display: none;
+    position: absolute;
+    bottom: calc(100% + 12px); /* Floats the panel nicely right above the button */
+    left: 0;
+    width: 360px;
+    height: 320px;
+    padding: 14px 16px 16px;
+    border-radius: var(--radius);
+    background: var(--glass-pane);
+    border: 1px solid var(--glass-border);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08), 0 10px 28px rgba(0, 0, 0, .16);
+    z-index: 40;
+}
+
+.brain-dump.is-open .brain-dump-content {
+    display: block; /* Makes the floating panel appear when open */
+}
+
+.brain-dump #brainDumpToggle {
+    display: inline-flex;
+}
+
+.brain-dump-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.brain-dump .panel-title {
+    padding: 0;
+}
+
+.brain-dump-close {
+    width: 28px;
+    height: 28px;
+    border: 0;
+    border-radius: var(--radius);
+    background: transparent;
+    color: var(--muted);
+    font-size: 22px;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+}
+
+.brain-dump textarea {
+    display: block;
+    width: 100%;
+    height: calc(100% - 36px);
+    resize: none;
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 10px;
+    background: #fafbfc;
+    color: var(--text);
+    font: 14px/1.5 'DM Sans', sans-serif;
+    box-sizing: border-box;
+    outline: 0;
+}
