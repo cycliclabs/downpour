@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Downpour</title>
+  <link rel="stylesheet" href="settings.css">
+  <link rel="stylesheet" href="common.css">
+  <link rel="stylesheet" href="responsive.css">
+  <link rel="stylesheet" href="page-focus.css">
+  <link rel="stylesheet" href="page-tasksandsomefocus.css">
+  <link rel="stylesheet" href="page-analytics.css">
+</head>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<body data-page="focus">
+
+
+
+  <header class="upper-bar">
+      <div class="upper-bar-left">
+        <h1 class="BrandTitle">downpour</h1>
+      </div>
+      
+      <div class="page-selector">
+        <button class="page-nav-button is-active" type="button" data-page="focus" aria-current="page" title="Focus">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+            <line x1="10" x2="14" y1="2" y2="2"></line>
+            <line x1="12" x2="15" y1="14" y2="11"></line>
+            <circle cx="12" cy="14" r="8"></circle>
+          </svg>
+          <span>Focus</span>
+        </button>
+        <button class="page-nav-button" type="button" data-page="analytics" title="Analytics">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M4 19V5m0 14h17M8 15l3-4 3 2 5-7" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8"></path>
+          </svg>
+          <span>Analytics</span>
+        </button>
+        <button class="page-nav-button" type="button" data-page="tasks" title="Tasks">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+            <path d="M13 5h8M13 12h8M13 19h8M3 17l2 2 4-4"></path>
+            <rect x="3" y="4" width="6" height="6" rx="1"></rect>
+          </svg>
+          <span>Tasks</span>
+        </button>
+      </div>
+
+      <div class="upper-bar-right">
+        <div class="stat-chips">
+          <span class="ui-control stat-chip stat-raindrops" title="Raindrops: earned by finishing tasks on time">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false"><path d="M12 2.5c3.6 4.3 6 7.3 6 10.6a6 6 0 0 1-12 0c0-3.3 2.4-6.3 6-10.6z"></path></svg>
+            <b id="raindropCount">0</b>
+          </span>
+          <span class="ui-control stat-chip stat-streak" id="streakChip" title="Day streak: days in a row with a completed task">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false"><path d="M12 2c.5 3 2 4.6 3.6 6.3C17.3 10.1 19 12 19 14.8A7 7 0 0 1 5 15c0-1.7.6-3.1 1.7-4.3.3 1.5 1.2 2.4 2.3 2.8C8.3 10.7 9.6 5.6 12 2z"></path></svg>
+            <b id="streakCount">0</b>
+          </span>
+        </div>
+        <button class="ui-button" id="settingsButton" type="button" aria-label="Open Settings" aria-pressed="false" title="Settings">
+          <img src="icons/settings.svg">
+        </button>
+      </div>
+    </header>
+        
+
+
+
+
+
+
+
+
+
+
+
+  <div class="page-content">
+    <section class="page-view focus-page" data-page-view="focus">
+
+      <section class="center-stage" id="centerStage" data-pomodoro-state="idle">
+
+        <div class="pomodoro-controls" id="pomodoroControls">
+          <button class="pomodoro-phase" id="pomodoroReset" type="button" data-phase="idle" disabled>
+            <span class="phase-name" id="pomodoroPhase">Ready to focus</span>
+            <span class="phase-action" aria-hidden="true"></span>
+          </button>
+        </div>
+
+        <div class="clock" id="clock">00:00</div>
+        <!-- Active task widget -->
+        <div class="focus-now-widget" id="focusNowWidget" aria-live="polite" hidden>
+          <div class="focus-now-task" id="focusNowTask"></div>
+        </div>
+
+        <!-- Idle task dropdown widget -->
+        <div class="focus-idle-widget" id="focusIdleWidget">
+          <div class="focus-tasks-dropdown" id="focusTasksDropdown">
+            <button class="focus-tasks-header" id="focusTasksToggle" type="button" aria-expanded="false">
+              <span class="focus-tasks-title">Today's tasks</span>
+              <span class="focus-tasks-count" id="focusTasksCount">0</span>
+              <span class="focus-tasks-chevron">▼</span>
+            </button>
+            <div class="focus-tasks-content" id="focusTasksContent">
+              <div class="tasks" id="focusTasksList"></div>
+              <button class="ui-control focus-add-task-btn" id="focusAddTaskBtn" type="button">+ Task</button>
+            </div>
+          </div>
+        </div>
+        <div class="live-time" id="liveTime" aria-label="Current time" hidden></div>
+        
+        <!-- Start countdown overlay -->
+        <div class="countdown-display" id="countdownDisplay" hidden aria-live="assertive">
+          <div class="countdown-value" id="countdownValue"></div>
+        </div>
+
+        <!-- Estimate prompt: shown when a task is started for the first time -->
+        <div class="eta-display" id="etaDisplay" hidden>
+          <h2>How long will <span class="eta-task" id="etaTaskName"></span> take?</h2>
+          <div class="eta-chips" id="etaChips"></div>
+          <form class="eta-form" id="etaForm">
+            <input class="ui-field is-stage" id="etaMinutes" type="number" min="1" max="1440" step="1" inputmode="numeric" placeholder="minutes" aria-label="Estimated minutes">
+            <button class="ui-control is-stage is-primary" type="submit">Start</button>
+          </form>
+          <div class="eta-links">
+            <button class="ui-control is-stage" type="button" id="etaSkip">Skip estimate</button>
+            <button class="ui-control is-stage" type="button" id="etaCancel">Cancel</button>
+          </div>
+        </div>
+
+        <!-- Task completed: bravo, time vs estimate, raindrops, streak -->
+        <div class="celebrate-display" id="celebrateDisplay" hidden aria-live="polite">
+          <h2 id="celebrateTitle"></h2>
+          <p class="celebrate-compare" id="celebrateCompare"></p>
+          <p class="celebrate-drops" id="celebrateDrops"></p>
+          <p class="celebrate-streak" id="celebrateStreak"></p>
+        </div>
+
+        <!-- Check-in overlay -->
+        <div class="checkin-display" id="checkinDisplay" hidden aria-live="assertive">
+          <h2>Are you still here?</h2>
+          <p>Task stops in <span id="checkinCountdown">30</span>s</p>
+          <button class="ui-control is-stage is-primary" id="checkinConfirm" type="button">Yes, I'm here</button>
+        </div>
+
+      </section>
+      
+      <div class="lower-bar">
+        <div class="lower-bar-left">
+          <section class="brain-dump" id="brainDumpPanel" aria-live="polite">
+            <button class="ui-button" id="brainDumpToggle" type="button" aria-label="Open brain dump" aria-expanded="false" aria-controls="brainDump" title="Brain Dump">
+              <img src="icons/notebook-pen.svg">
+            </button>
+            <div class="brain-dump-content">
+              <div class="brain-dump-header">
+                <div class="panel-title">Brain dump</div>
+                <button class="brain-dump-close" id="brainDumpClose" type="button" aria-label="Close brain dump" title="Collapse brain dump">×</button>
+              </div>
+              <textarea class="ui-field" id="brainDump" placeholder="Write anything on your mind..."></textarea>
+            </div>
+          </section>
+          <section class="focus-music" id="focusMusicPanel" aria-live="polite">
+            <button class="ui-button" id="focusMusicToggle" type="button" aria-label="Open music panel" aria-expanded="false" aria-controls="musicContent" title="Focus Music">
+              <img src="icons/music-4.svg">
+            </button>
+            
+            <!-- Floating Music Panel -->
+            <div class="music-content" id="musicContent">
+              <div class="music-header">
+                <div class="music-tabs">
+                  <button class="music-tab is-active" type="button" data-tab="ambient">Ambient Sounds</button>
+                  <button class="music-tab" type="button" data-tab="playlists">My Playlists</button>
+                </div>
+                <button class="brain-dump-close" id="musicClose" type="button" aria-label="Close music panel" title="Collapse">×</button>
+              </div>
+
+              <!-- Ambient Sounds Tab -->
+              <div class="music-tab-content" id="tab-ambient">
+                <div class="music-grid" id="ambientGrid">
+                  <button class="sound-btn" data-sound="rain"><span class="sound-icon">🌧️</span><span class="sound-name">Rain</span></button>
+                  <button class="sound-btn" data-sound="ocean"><span class="sound-icon">🌊</span><span class="sound-name">Ocean</span></button>
+                  <button class="sound-btn" data-sound="cafe"><span class="sound-icon">☕</span><span class="sound-name">Bustling Café</span></button>
+                  <button class="sound-btn" data-sound="airplane"><span class="sound-icon">✈️</span><span class="sound-name">Airplane Cabin</span></button>
+                  <button class="sound-btn" data-sound="train"><span class="sound-icon">🚆</span><span class="sound-name">Commuter Train</span></button>
+                  <button class="sound-btn" data-sound="library"><span class="sound-icon">📚</span><span class="sound-name">Library</span></button>
+                  <button class="sound-btn" data-sound="fireplace"><span class="sound-icon">🔥</span><span class="sound-name">Fireplace</span></button>
+                  <button class="sound-btn" data-sound="campfire"><span class="sound-icon">🪵</span><span class="sound-name">Campfire</span></button>
+                  <button class="sound-btn" data-sound="office"><span class="sound-icon">🏢</span><span class="sound-name">Office</span></button>
+                  <button class="sound-btn" data-sound="wind"><span class="sound-icon">💨</span><span class="sound-name">Wind</span></button>
+                  <button class="sound-btn" data-sound="white-noise"><span class="sound-icon">📻</span><span class="sound-name">White Noise</span></button>
+                  <button class="sound-btn" data-sound="pink-noise"><span class="sound-icon">🌸</span><span class="sound-name">Pink Noise</span></button>
+                </div>
+              </div>
+
+              <!-- My Playlists Tab -->
+              <div class="music-tab-content" id="tab-playlists" hidden>
+                <div class="spotify-input-row">
+                  <input class="ui-field" type="text" id="spotifyUrlInput" placeholder="Paste Spotify Playlist or Album URL...">
+                  <button class="ui-control" id="spotifyAddBtn" type="button">Load</button>
+                </div>
+                <div class="spotify-embed-container" id="spotifyEmbedContainer">
+                  <!-- Iframe gets injected here -->
+                  <div class="spotify-empty">Paste a link above to load your playlist.</div>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <div class="lower-bar-right">
+          <button class="ui-button" id="pomodoroPipButton" type="button" aria-label="Enter picture in picture" aria-pressed="false" title="Mini-Viewer">
+            <img src="icons/picture-in-picture.svg">
+          </button>
+          <button class="ui-button" id="fullscreenButton" type="button" aria-label="Enter full screen" aria-pressed="false">
+            <img src="icons/maximize-2.svg">
+          </button>
+        </div>
+
+      </div>
+    </section>
+
+    <section class="page-view" id="tasksPage" data-page-view="tasks" hidden>
+
+      <section class="task-planner panel" id="taskPlanner" aria-labelledby="taskPlannerMonth">
+        <div class="task-planner-heading">
+          <div>
+            <h2 class="panel-title" id="taskPlannerMonth"></h2>
+            <p>Drag tasks onto a date to reschedule them.</p>
+          </div>
+          <div class="task-selected-date" id="taskSelectedDate" aria-live="polite"></div>
+          <div class="task-planner-navigation">
+            <button class="ui-button" type="button" data-month-offset="-1" aria-label="Previous month">
+              <img src="icons/chevron-left.svg">
+            </button>
+            <button class="ui-button" type="button" data-month-offset="1" aria-label="Next month">
+              <img src="icons/chevron-right.svg">
+            </button>
+          </div>
+        </div>
+        <div class="task-planner-weekdays" aria-hidden="true">
+          <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
+        </div>
+        <div class="task-planner-grid" id="taskPlannerGrid" aria-label="Task calendar"></div>
+      </section>
+      
+      <section class="task-area">
+        <div class="toolbar">
+          <div class="task-heading">
+            <h2 class="panel-title">Tasks</h2>
+          </div>
+        </div>
+
+        <div class="task-filters">
+          <select class="ui-control" id="categoryFilter" aria-label="Filter tasks by category"></select>
+          <label class="ui-control">
+            <input type="checkbox" id="hideCompletedToggle">
+            <span>Hide completed</span>
+          </label>
+        </div>
+
+        <div class="tasks" id="tasks"></div>
+
+        <div class="task-add-row">
+          <button class="ui-control" id="addTask">+ Task</button>
+        </div>
+      </section>
+      
+    </section>
+
+    <section class="page-view analytics-page" data-page-view="analytics" hidden>
+      <section class="panel" id="focusActivity">
+        <div class="activity-heading toolbar">
+          <h2 class="panel-title">Focus activity</h2>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <!-- NEW: Activity Category Filter -->
+            <label class="activity-year-control">
+              <span>Category</span>
+              <select class="ui-control" id="activityCategoryFilter" aria-label="Focus activity category"></select>
+            </label>
+            <label class="activity-year-control">
+              <span>Year</span>
+              <select class="ui-control" id="activityYear" aria-label="Focus activity year"></select>
+            </label>
+          </div>
+        </div>
+        <div class="activity-scroll" aria-label="Focus activity by day">
+          <div class="activity-calendar">
+            <div class="activity-months" id="activityMonths" aria-hidden="true"></div>
+            <div class="activity-chart">
+              <div class="activity-weekdays" aria-hidden="true"><span>Mon</span><span>Wed</span><span>Fri</span></div>
+              <div class="activity-grid" id="activityGrid" role="group" aria-label="Daily focus activity"></div>
+            </div>
+          </div>
+        </div>
+        <div class="activity-legend" aria-label="Focus time intensity">
+          <span>Less</span>
+          <span class="activity-cell" data-level="0" aria-hidden="true"></span>
+          <span class="activity-cell" data-level="1" aria-hidden="true"></span>
+          <span class="activity-cell" data-level="2" aria-hidden="true"></span>
+          <span class="activity-cell" data-level="3" aria-hidden="true"></span>
+          <span class="activity-cell" data-level="4" aria-hidden="true"></span>
+          <span class="activity-cell" data-level="5" aria-hidden="true"></span>
+          <span>More</span>
+        </div>
+      </section>
+      <section class="focus-trend panel" id="focusTrend">
+        <div class="focus-trend-heading toolbar">
+          <h2 class="panel-title">Focus trend</h2>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <!-- NEW: Multi-select Dropdown for Trend Categories -->
+            <div class="trend-multi-select" id="trendMultiSelect">
+              <button class="ui-control trend-multi-btn" id="trendMultiBtn" type="button">
+                Categories <span class="trend-multi-count" id="trendMultiCount">(0)</span>
+              </button>
+              <div class="trend-multi-content" id="trendMultiContent"></div>
+            </div>
+            <label class="focus-trend-control">
+              <span>View</span>
+              <select id="activityTrendRange" class="ui-control" aria-label="Focus trend period">
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+                <option value="monthly">Monthly</option>
+                <option value="yearly">Yearly</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        <div id="activityTrendChart" class="focus-trend-chart" aria-live="polite"></div>
+      </section>
+      <section class="panel" id="timeLine" aria-labelledby="calendarTitle">
+        <div class="timeline-heading">
+          <h2 class="panel-title">Timeline</h2>
+          <div class="timeline-date" id="calendarDate"></div>
+        </div>
+        <div class="timeline-scroll" id="calendarScroll" aria-label="Scrollable task timeline">
+          <div class="timeline-grid" id="taskCalendar" aria-label="Task sessions on the selected date"></div>
+        </div>
+      </section>
+      <section class="panel" id="focusSummary">
+        <h2 class="panel-title">Focus Summary</h2>
+        <div class="focus-selected-date" id="focusSelectedDate"></div>
+        <div class="focus-total" id="focusTotal">0s</div>
+        <div class="focus-label">Total focus time</div>
+        <div id="focusProgress"></div>
+      </section>
+    </section>
+  </div>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  <!-- Settings Side Panel -->
+  <div class="settings-backdrop" id="settingsBackdrop"></div>
+  <aside class="settings-panel" id="settingsPanel">
+    <div class="settings-header">
+      <h2 id="settingsTitle">Settings</h2>
+      <button class="ui-button" id="closeSettings" type="button" aria-label="Close Settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 20px; height: 20px;">
+          <line x1="18" y1="6" x2="6" y2="18"></line>
+          <line x1="6" y1="6" x2="18" y2="18"></line>
+        </svg>
+      </button>
+    </div>
+    
+    <div class="settings-body">
+      <!-- Left Sidebar Navigation -->
+      <nav class="settings-nav">
+        <button type="button" class="settings-nav-item is-active" data-settings-tab="background">Background</button>
+        <button type="button" class="settings-nav-item" data-settings-tab="clock">Clock and Timer</button>
+        <button type="button" class="settings-nav-item" data-settings-tab="tasks">Tasks</button> <!-- NEW -->
+        <button type="button" class="settings-nav-item" data-settings-tab="account">Account</button>
+        <button type="button" class="settings-nav-item" data-settings-tab="about">About Us</button>
+        <button type="button" class="settings-nav-item settings-nav-bottom" data-settings-tab="export">Export Your Data</button>
+      </nav>
+
+      <!-- Right Content Area -->
+      <div class="settings-content">
+        
+        <!-- Background Tab -->
+        <section class="settings-tab" id="tab-background">
+          
+          <h3>Static</h3>
+          <div class="background-choices" id="backgroundChoices" role="group" aria-label="Choose background image"></div>
+
+          <h3 style="margin-top: 24px;">Animated</h3>
+          <p style="font-size: 13px; color: var(--muted); margin: 0 0 12px;">Coming soon...</p>
+
+          <h3 style="margin-top: 24px;">YouTube Video</h3>
+          <div class="video-input-row">
+            <input class="ui-field" type="text" id="backgroundVideoUrl" placeholder="Paste YouTube link..." aria-label="YouTube link">
+            <button class="ui-control is-primary" id="backgroundVideoBtn" type="button">Set</button>
+            <button class="ui-control" id="backgroundVideoClear" type="button" hidden>Remove</button>
+          </div>
+          <p class="settings-note" id="backgroundVideoStatus" aria-live="polite"></p>
+
+        </section>
+
+        <!-- Clock and Timer Tab -->
+        <section class="settings-tab" id="tab-clock" hidden>
+          <h3>Clock Font</h3>
+          <div class="font-choices" id="clockFontChoices" role="group" aria-label="Choose clock font"></div>
+          
+          <h3 style="margin-top: 24px;">Pomodoro</h3>
+          <form class="pomodoro-settings" id="pomodoroSettings">
+            <label for="pomodoroFocusMinutes">
+              Focus · minutes
+              <input class="ui-field" id="pomodoroFocusMinutes" type="number" min="1" max="180" step="1" required>
+            </label>
+            <label for="pomodoroBreakMinutes">
+              Break · minutes
+              <input class="ui-field" id="pomodoroBreakMinutes" type="number" min="1" max="60" step="1" required>
+            </label>
+            <button class="ui-control" type="submit">Save times</button>
+          </form>
+
+          <h3 style="margin-top: 24px;">Alert Sound</h3>
+          <select class="ui-control" style="width: 100%;">
+            <option>Default Beep</option>
+            <option>Soft Chime</option>
+            <option>Digital</option>
+          </select>
+        </section>
+
+        <!-- About Us Tab -->
+        <section class="settings-tab" id="tab-about" hidden>
+          <h3>About Us</h3>
+          <p style="font-size: 13px; line-height: 1.6; color: var(--muted);">
+            Downpour is a minimalist focus application designed to help you get into a state of deep work. 
+            By combining a flexible Pomodoro timer with task tracking and ambient soundscapes, it aims to remove friction 
+            and make focusing effortless.
+          </p>
+        </section>
+
+        <section class="settings-tab" id="tab-account" hidden>
+          <h3>Account</h3>
+          <form id="accountForm" class="account-form">
+            <input class="ui-field" type="email" id="accountEmail" placeholder="Email" autocomplete="email" aria-label="Email">
+            <input class="ui-field" type="password" id="accountPassword" placeholder="Password" autocomplete="current-password" aria-label="Password">
+            <div class="video-input-row">
+              <button class="ui-control is-primary" id="accountSignIn" type="button">Sign in</button>
+              <button class="ui-control" id="accountSignUp" type="button">Create account</button>
+            </div>
+          </form>
+          <div id="accountSignedIn" class="account-form" hidden>
+            <p class="settings-note" id="accountWho"></p>
+            <div class="video-input-row"><button class="ui-control" id="accountSignOut" type="button">Sign out</button></div>
+          </div>
+          <p class="settings-note" id="accountStatus" aria-live="polite"></p>
+        </section>
+
+        <!-- Export Tab -->
+        <section class="settings-tab" id="tab-export" hidden>
+          <h3>Export Your Data</h3>
+          <p style="font-size: 13px; color: var(--muted); margin-bottom: 12px; line-height: 1.5;">
+            Downpour is 100% local-first. Your tasks, stats, and settings are saved securely in your browser, not on a server. 
+            <br><br>
+            Download a backup to keep your data safe, or import a previous backup to restore it.
+          </p>
+          <div style="display: flex; gap: 8px; margin-top: 16px;">
+            <button class="ui-control" id="exportDataBtn" style="flex: 1;">Download Backup</button>
+            <button class="ui-control" id="importDataBtn" style="flex: 1;">Import Backup</button>
+          </div>
+        </section>
+
+        <section class="settings-tab" id="tab-tasks" hidden>
+          <h3>Categories</h3>
+          <button class="ui-control" id="addCat" style="width: 100%; margin-bottom: 16px;">+ New category</button>
+          <div class="category-editor" id="categoryEditor"></div>
+        </section>
+
+      </div>
+    </div>
+  </aside>
+
+
+  <!-- Task Modal Container -->
+  <div id="taskModal" class="task-modal" hidden></div>
+
+
+  <!-- Visual effects -->
+  <svg class="glass-filter-defs" aria-hidden="true" focusable="false">
+    <defs>
+      <filter id="liquid-glass-refraction" x="-10%" y="-10%" width="120%" height="120%" color-interpolation-filters="sRGB">
+        <feTurbulence type="fractalNoise" baseFrequency=".018 .035" numOctaves="2" seed="8" result="map"></feTurbulence>
+        <feDisplacementMap in="SourceGraphic" in2="map" scale="-4" xChannelSelector="R" yChannelSelector="G" result="dispRed"></feDisplacementMap>
+        <feColorMatrix in="dispRed" type="matrix" values="1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0" result="red"></feColorMatrix>
+        <feDisplacementMap in="SourceGraphic" in2="map" scale="-6" xChannelSelector="R" yChannelSelector="G" result="dispGreen"></feDisplacementMap>
+        <feColorMatrix in="dispGreen" type="matrix" values="0 0 0 0 0 0 1 0 0 0 0 0 0 0 0 0 0 0 1 0" result="green"></feColorMatrix>
+        <feDisplacementMap in="SourceGraphic" in2="map" scale="-8" xChannelSelector="R" yChannelSelector="G" result="dispBlue"></feDisplacementMap>
+        <feColorMatrix in="dispBlue" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 0 1 0" result="blue"></feColorMatrix>
+        <feBlend in="red" in2="green" mode="screen" result="rg"></feBlend>
+        <feBlend in="rg" in2="blue" mode="screen" result="output"></feBlend>
+        <feGaussianBlur in="output" stdDeviation=".25"></feGaussianBlur>
+      </filter>
+    </defs>
+  </svg>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+  <script src="cloud.js"></script>
+  <script src="app.js"></script>
+
+
+</body>
+</html>

@@ -13,7 +13,9 @@ class FocusStore {
       brainDump: "",
       dailyTarget: null,
       pomodoro: null,
-      pomodoroSettings: { focusMinutes: 25, breakMinutes: 5 }
+      pomodoroSettings: { focusMinutes: 25, breakMinutes: 5 },
+      raindrops: 0,                              // currency earned by completing tasks (see FocusApp.RAINDROPS)
+      streak: { count: 0, lastDate: null }       // consecutive days with at least one completed task
     };
   }
 
@@ -33,12 +35,14 @@ class FocusStore {
     return {
       ...defaults,
       ...saved,
-      pomodoroSettings: { ...defaults.pomodoroSettings, ...savedPomodoroSettings }
+      pomodoroSettings: { ...defaults.pomodoroSettings, ...savedPomodoroSettings },
+      streak: { ...defaults.streak, ...(saved.streak && typeof saved.streak === "object" ? saved.streak : {}) }
     };
   }
 
   save() {
     localStorage.setItem(FocusStore.KEY, JSON.stringify(this.state));
+    window.dispatchEvent(new Event("focus-changed"));
   }
 
   addTask(task) {
@@ -58,6 +62,27 @@ class FocusStore {
 
 class FocusApp {
   static BACKGROUNDS = ["images/bg.jpg", "images/bg2.jpg", "images/bg3.jpg", "images/bg4.jpg", "images/bg5.jpg"];
+  // Clock fonts. Every font file becomes a choice in settings; the family name, weight and
+  // variable-ness are read from the file name (see parseFontFile). Files come from two places:
+  //   1. BUNDLED_FONT_FILES: files in ./fonts that you list here (always works, even from file://)
+  //   2. anything else in ./fonts, when the page is served over http(s) with directory listing
+  //      (e.g. `python -m http.server`, VS Code Live Server)
+  static BUNDLED_FONT_FILES = [
+    "Jost-VariableFont_wght.ttf",
+    "Audiowide-Regular.ttf",
+    "Cinzel-VariableFont_wght.ttf",
+    "NationalPark-VariableFont_wght.ttf",
+    "Unkempt-Bold.ttf"
+  ];
+  static DEFAULT_CLOCK_FONT = "Jost";
+  // Raindrops are awarded when a task is checked off, by comparing the focused time with the estimate:
+  //   ratio < onTargetBand[0]        faster than estimated  -> `faster` (a lot faster pays the same)
+  //   within onTargetBand            on target              -> `base`
+  //   ratio > onTargetBand[1]        slower than estimated  -> `slower`
+  // A task needs an estimate and at least `minFocusMs` of focus to pay out, and pays out once.
+  static RAINDROPS = { base: 10, faster: 12, slower: 8, onTargetBand: [0.9, 1.1], minFocusMs: 60 * 1000 };
+  static ETA_PRESETS = [15, 25, 45, 60, 90, 120];   // minutes offered when a task is started
+  static CELEBRATION_MS = 6000;
   static POMODORO_WORK_MS = 25 * 60 * 1000;
   static POMODORO_BREAK_MS = 5 * 60 * 1000;
 
@@ -73,20 +98,67 @@ class FocusApp {
     this.selectedCategory = "all";
     this.editingTaskId = null;
     this.expandedTaskId = null;
-    this.focusCategory = "all";
     this.lastCalendarMinute = null;
     this.lastFocusTaskDate = this.today();
     this.calendarAutoScrollPending = true;
     this.audioContext = null;
+    this.countdown = null;
+    this.countdownInterval = null;
+    this.totalActiveFocusMs = 0;
+    this.lastActiveTick = null;
+    this.checkInActive = false;
+    this.checkInDeadline = null;
+    this.etaPrompt = null;
+    this.celebrationTimer = null;
     this.elements = this.getElements();
     this.renderBackgroundChoices();
+    this.selectedActivityCategory = "all";
+    this.selectedTrendCategories = [];
     this.selectedCategory = "all";
     this.hideCompleted = false;
     const savedBackground = localStorage.getItem("focus-background-image");
     this.setBackgroundImage(FocusApp.BACKGROUNDS.includes(savedBackground) ? savedBackground : FocusApp.BACKGROUNDS[0], false);
+    const savedVideo = localStorage.getItem("focus-background-video");
+    if (savedVideo) this.setBackgroundVideo(savedVideo, false);
+    this.clockFonts = new Map();
+    this.clockFont = localStorage.getItem("focus-clock-font") || FocusApp.DEFAULT_CLOCK_FONT;
+    this.setClockFont(this.clockFont, false);      // applies at once; the list below fills in asynchronously
+    this.loadClockFonts();
     this.bindEvents();
     this.render();
     window.setInterval(() => {
+      const now = Date.now();
+
+      // --- Active Focus Time Tracking ---
+      const isActivelyFocusing = this.store.state.active && 
+                                 !this.store.state.pomodoro?.paused && 
+                                 this.store.state.pomodoro?.phase !== "break" && 
+                                 !this.checkInActive &&
+                                 !this.countdown; // Don't count during the 3-2-1 countdown
+
+      if (isActivelyFocusing) {
+        if (!this.lastActiveTick) this.lastActiveTick = now;
+        this.totalActiveFocusMs += (now - this.lastActiveTick);
+        this.lastActiveTick = now;
+
+        // Trigger prompt at exactly 1 hour (60 * 60 * 1000) of focus
+        if (this.totalActiveFocusMs >= 60 * 60 * 1000) {
+          this.openCheckIn();
+        }
+      } else {
+        this.lastActiveTick = null; // Pause the tracker if not actively focusing
+      }
+
+      // --- Check-in Countdown ---
+      if (this.checkInActive) {
+        const remaining = Math.max(0, Math.ceil((this.checkInDeadline - now) / 1000));
+        if (remaining <= 0) {
+          this.checkInTimeout();
+          return; // Stop processing further renders this tick, task is stopping
+        } else {
+          this.elements.checkinCountdown.textContent = remaining;
+        }
+      }
       const phaseChanged = this.advancePomodoro(Date.now());
       if (phaseChanged) {
         this.render();
@@ -110,7 +182,6 @@ class FocusApp {
   getElements() {
     const query = selector => this.document.querySelector(selector);
     return {
-      date: query("#date"),
       clock: query("#clock"),
       liveTime: query("#liveTime"),
       taskPlanner: query("#taskPlanner"),
@@ -120,33 +191,33 @@ class FocusApp {
       focusNowWidget: query("#focusNowWidget"),
       focusNowTask: query("#focusNowTask"),
       timeLine: query("#timeLine"),
-      focusTasksPanel: query("#focusTasksPanel"),
       backgroundChoices: query("#backgroundChoices"),
+      backgroundVideoUrl: query("#backgroundVideoUrl"),
+      backgroundVideoBtn: query("#backgroundVideoBtn"),
+      backgroundVideoClear: query("#backgroundVideoClear"),
+      backgroundVideoStatus: query("#backgroundVideoStatus"),
+      clockFontChoices: query("#clockFontChoices"),
       categoryFilter: query("#categoryFilter"),
       taskSelectedDate: query("#taskSelectedDate"),
       categoryEditor: query("#categoryEditor"),
       tasks: query("#tasks"),
-      focusTasks: query("#focusTasks"),
-      focusAddTask: query("#focusAddTask"),
       focusTotal: query("#focusTotal"),
       focusProgress: query("#focusProgress"),
-      focusBreakdown: query("#focusBreakdown"),
       activityMonths: query("#activityMonths"),
       activityGrid: query("#activityGrid"),
+      activityLegend: query(".activity-legend"),
+      activityCard: query("#focusActivity"),
       activityYear: query("#activityYear"),
       activityTrendRange: query("#activityTrendRange"),
       activityTrendChart: query("#activityTrendChart"),
       focusSelectedDate: query("#focusSelectedDate"),
       pomodoroPhase: query("#pomodoroPhase"),
-      pomodoroProgress: query("#pomodoroProgress"),
-      pomodoroProgressArc: query("#pomodoroProgressArc"),
       pomodoroSettings: query("#pomodoroSettings"),
       pomodoroFocusMinutes: query("#pomodoroFocusMinutes"),
       pomodoroBreakMinutes: query("#pomodoroBreakMinutes"),
-      skipBreak: query("#skipBreak"),
       pomodoroReset: query("#pomodoroReset"),
-      clockPanel: query("#clockPanel"),
-      pomodoroDisplay: query("#pomodoroDisplay"),
+      centerStage: query("#centerStage"),
+      pomodoroControls: query("#pomodoroControls"),
       calendarDate: query("#calendarDate"),
       calendarScroll: query("#calendarScroll"),
       taskCalendar: query("#taskCalendar"),
@@ -157,34 +228,112 @@ class FocusApp {
       hideCompletedToggle: query("#hideCompletedToggle"),
       pageViews: this.document.querySelectorAll(".page-view[data-page-view]"),
       pomodoroPipButton: query("#pomodoroPipButton"),
-      focusCategoryFilter: query("#focusCategoryFilter"),
+      focusIdleWidget: query("#focusIdleWidget"),
+      focusTasksDropdown: query("#focusTasksDropdown"),
+      focusTasksToggle: query("#focusTasksToggle"),
+      focusTasksList: query("#focusTasksList"),
+      focusTasksCount: query("#focusTasksCount"),
+      focusAddTaskBtn: query("#focusAddTaskBtn"),
 
       settingsButton: query("#settingsButton"),
       settingsPanel: query("#settingsPanel"),
       settingsBackdrop: query("#settingsBackdrop"),
       closeSettings: query("#closeSettings"),
+
+      countdownDisplay: query("#countdownDisplay"),
+      countdownValue: query("#countdownValue"),
+      checkinDisplay: query("#checkinDisplay"),
+      checkinCountdown: query("#checkinCountdown"),
+      checkinConfirm: query("#checkinConfirm"),
+      etaDisplay: query("#etaDisplay"),
+      etaTaskName: query("#etaTaskName"),
+      etaChips: query("#etaChips"),
+      etaForm: query("#etaForm"),
+      etaMinutes: query("#etaMinutes"),
+      etaSkip: query("#etaSkip"),
+      etaCancel: query("#etaCancel"),
+      celebrateDisplay: query("#celebrateDisplay"),
+      celebrateTitle: query("#celebrateTitle"),
+      celebrateCompare: query("#celebrateCompare"),
+      celebrateDrops: query("#celebrateDrops"),
+      celebrateStreak: query("#celebrateStreak"),
+      raindropCount: query("#raindropCount"),
+      streakCount: query("#streakCount"),
+      streakChip: query("#streakChip"),
+
+      focusMusicToggle: query("#focusMusicToggle"),
+      focusMusicPanel: query("#focusMusicPanel"),
+      musicClose: query("#musicClose"),
+
+      activityCategoryFilter: query("#activityCategoryFilter"),
+      trendMultiSelect: query("#trendMultiSelect"),
+      trendMultiBtn: query("#trendMultiBtn"),
+      trendMultiCount: query("#trendMultiCount"),
+      trendMultiContent: query("#trendMultiContent"),
     };
   }
 
+  // Sizes the clock so its digits are exactly as wide as the bar under it (70 stage units).
+  // The ratio is independent of the unit, so one scale works on the page and in PiP.
+  fitClock() {
+    const stage = this.elements.centerStage;
+    const clock = this.elements.clock;
+    const width = clock.getBoundingClientRect().width;
+    if (!width) return;                              // page hidden
+    const current = parseFloat(stage.style.getPropertyValue("--clock-scale")) || 20;
+    const unit = parseFloat(getComputedStyle(clock).fontSize) / current;
+    const next = Math.min(26, Math.max(8, current * 70 * unit / width));   // max keeps the column inside the stage
+    if (Math.abs(next - current) > 0.05) stage.style.setProperty("--clock-scale", next.toFixed(2));
+  }
+
   bindEvents() {
+    new ResizeObserver(() => this.fitClock()).observe(this.elements.clock);
     this.document.addEventListener("pointerdown", () => this.unlockAudio(), { once: true });
     this.document.addEventListener("fullscreenchange", () => this.updateFullscreenButtonState());
     this.document.addEventListener("webkitfullscreenchange", () => this.updateFullscreenButtonState());
 
     this.document.querySelector("#addTask").onclick = () => this.openNewTaskModal();
-    this.elements.focusAddTask.onclick = () => this.openNewTaskModal();
+    
+    // The new "+ Task" button inside the dropdown
+    this.elements.focusAddTaskBtn.onclick = () => this.openNewTaskModal();
+
+    // Logic to open/close the dropdown when clicking the header
+    this.elements.focusTasksToggle.onclick = (e) => {
+      e.stopPropagation(); // Prevents the document-level click listener from immediately closing it
+      const dropdown = this.elements.focusTasksDropdown;
+      const isOpen = dropdown.classList.toggle("is-open");
+      this.elements.focusTasksToggle.setAttribute("aria-expanded", String(isOpen));
+    };
 
     this.document.querySelector("#addCat").onclick = () => this.addCategory();
     this.elements.fullscreenButton.onclick = () => this.toggleFullscreen();
+    this.elements.pomodoroPipButton.onclick = () => this.toggleDocumentPiP();
+    this.elements.clockFontChoices.onclick = event => {
+      const choice = event.target.closest("[data-font]");
+      if (choice) this.setClockFont(choice.dataset.font);
+    };
     this.elements.backgroundChoices.onclick = event => {
       const choice = event.target.closest("[data-background]");
-      if (choice) this.setBackgroundImage(choice.dataset.background);
+      if (!choice) return;
+      this.setBackgroundVideo(null);              // one background at a time: a picture replaces the video
+      this.setBackgroundImage(choice.dataset.background);
+    };
+    this.elements.backgroundVideoBtn.onclick = () => this.applyBackgroundVideoInput();
+    this.elements.backgroundVideoUrl.onkeydown = event => {
+      if (event.key === "Enter") this.applyBackgroundVideoInput();
+    };
+    this.elements.backgroundVideoClear.onclick = () => this.setBackgroundVideo(null);
+
+    this.elements.activityCategoryFilter.onchange = (e) => {
+      this.selectedActivityCategory = e.target.value;
+      this.renderActivityCalendar();
     };
 
-
-
-
-
+    // Trend Multi-select Dropdown
+    this.elements.trendMultiBtn.onclick = (e) => {
+      e.stopPropagation();
+      this.elements.trendMultiSelect.classList.toggle("is-open");
+    };
 
 
     this.document.addEventListener("keydown", event => {
@@ -203,18 +352,41 @@ class FocusApp {
         this.collapseBrainDump();
         return;
       }
+      if (this.elements.focusMusicPanel.classList.contains("is-open")) {
+        this.collapseMusicPanel();
+        return;
+      }
     });
 
     this.document.addEventListener("click", event => {
+      // Close Brain Dump
+      if (this.elements.brainDumpPanel.classList.contains("is-open")) {
+        if (!this.elements.brainDumpPanel.contains(event.target)) {
+          this.collapseBrainDump();
+        }
+      }
+
+      // Close Focus Music
+      if (this.elements.focusMusicPanel.classList.contains("is-open")) {
+        if (!this.elements.focusMusicPanel.contains(event.target)) {
+          this.collapseMusicPanel();
+        }
+      }
+
+      if (this.elements.trendMultiSelect.classList.contains("is-open") && !this.elements.trendMultiSelect.contains(event.target)) {
+        this.elements.trendMultiSelect.classList.remove("is-open");
+      }
+
+      // Close Tasks Dropdown
+      if (!this.elements.focusTasksDropdown.contains(event.target)) this.closeFocusTasks();
+
+      // Close Task Modal / Inline Details
       const modal = this.document.getElementById("taskModal");
-      
-      // If modal is open, close it when clicking the dark backdrop
       if (modal && !modal.hidden) {
         if (event.target === modal) {
           this.closeTaskModal();
         }
       } else {
-        // Standard fallback to close any open inline tasks
         if (!event.target.closest(".task-row")) {
           this.document.querySelectorAll(".task-row.is-expanded").forEach(row => {
             row.classList.remove("is-expanded");
@@ -227,7 +399,44 @@ class FocusApp {
     });
 
 
+    // --- Music Panel Logic ---
+    this.elements.focusMusicToggle.onclick = () => this.toggleMusicPanel();
+    this.elements.musicClose.onclick = () => this.collapseMusicPanel();
 
+    // Tab Switching
+    this.document.querySelectorAll(".music-tab").forEach(tab => {
+      tab.onclick = () => {
+        this.document.querySelectorAll(".music-tab").forEach(t => t.classList.remove("is-active"));
+        tab.classList.add("is-active");
+        
+        const target = tab.dataset.tab;
+        this.document.getElementById("tab-ambient").hidden = target !== "ambient";
+        this.document.getElementById("tab-playlists").hidden = target !== "playlists";
+      };
+    });
+
+    // Ambient Sounds Toggle (Visual only for now)
+    this.document.querySelectorAll(".sound-btn").forEach(btn => {
+      btn.onclick = () => btn.classList.toggle("is-active");
+    });
+
+    // Spotify Loader
+    this.document.getElementById("spotifyAddBtn").onclick = () => {
+      const input = this.document.getElementById("spotifyUrlInput").value;
+      const container = this.document.getElementById("spotifyEmbedContainer");
+      
+      // Extract the type (playlist, album, track) and ID from the URL
+      const match = input.match(/spotify\.com\/(playlist|album|track)\/([a-zA-Z0-9]+)/);
+      
+      if (match && match[1] && match[2]) {
+        const type = match[1];
+        const id = match[2];
+        container.innerHTML = `<iframe src="https://open.spotify.com/embed/${type}/${id}?utm_source=generator&theme=0" allowfullscreen="" allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture" loading="lazy"></iframe>`;
+        this.document.getElementById("spotifyUrlInput").value = ""; // Clear input
+      } else {
+        container.innerHTML = `<div class="spotify-empty" style="color:#ff5c5c">Invalid Spotify URL. Please paste a valid link.</div>`;
+      }
+    };
 
 
 
@@ -237,9 +446,7 @@ class FocusApp {
       event.preventDefault();
       this.savePomodoroSettings();
     };
-    this.elements.skipBreak.onclick = () => this.skipBreak();
     this.elements.pomodoroReset.onclick = () => this.resetPomodoro();
-    this.document.querySelector("#editCategories").onclick = () => this.toggleCategoryEditor();
     this.elements.taskPlanner.onclick = event => {
       const monthButton = event.target.closest("[data-month-offset]");
       if (monthButton) {
@@ -291,6 +498,25 @@ class FocusApp {
     this.elements.closeSettings.onclick = () => this.closeSettings();
     this.elements.settingsBackdrop.onclick = () => this.closeSettings();
 
+    // --- NEW: Settings Sidebar Navigation ---
+    const settingsNavItems = this.document.querySelectorAll(".settings-nav-item");
+    const settingsTabs = this.document.querySelectorAll(".settings-tab");
+
+    settingsNavItems.forEach(item => {
+      item.onclick = () => {
+        // Remove active class from all nav items
+        settingsNavItems.forEach(nav => nav.classList.remove("is-active"));
+        // Add active class to clicked item
+        item.classList.add("is-active");
+
+        // Hide all tabs
+        settingsTabs.forEach(tab => tab.hidden = true);
+        // Show the matching tab
+        const targetTab = this.document.getElementById(`tab-${item.dataset.settingsTab}`);
+        if (targetTab) targetTab.hidden = false;
+      };
+    });
+
     this.document.addEventListener("click", event => {
           const button = event.target.closest(".page-nav-button[data-page]");
           if (button) {
@@ -305,25 +531,27 @@ class FocusApp {
       this.hideCompleted = this.elements.hideCompletedToggle.checked;
       this.renderTasks();
     };
-    this.elements.pomodoroPipButton.onclick = () => this.toggleDocumentPiP();
-    this.renderFocusCategoryFilter();
-  }
-
-  renderFocusCategoryFilter() {
-    const { categories, tasks } = this.store.state;
-    const today = this.today();
-    const allCount = tasks.filter(task => task.date === today).length;
-    const options = [`<option value="all">All categories (${allCount})</option>`];
-    categories.forEach(category => {
-      const count = tasks.filter(task => task.date === today && task.category === category.id).length;
-      options.push(`<option value="${this.escape(category.id)}">${this.escape(category.name)} (${count})</option>`);
-    });
-    this.elements.focusCategoryFilter.innerHTML = options.join("");
-    this.elements.focusCategoryFilter.value = this.focusCategory;
-    this.elements.focusCategoryFilter.onchange = event => {
-      this.focusCategory = event.target.value;
-      this.renderTasks();
+    this.elements.checkinConfirm.onclick = () => this.confirmCheckIn();
+    this.elements.etaChips.innerHTML = FocusApp.ETA_PRESETS.map(minutes =>
+      `<button class="ui-control is-stage" type="button" data-minutes="${minutes}">${minutes < 60 ? `${minutes}m` : `${minutes / 60}h`}</button>`).join("");
+    this.elements.etaChips.onclick = event => {
+      const chip = event.target.closest("[data-minutes]");
+      if (chip) this.chooseEta(Number(chip.dataset.minutes));
     };
+    this.elements.etaForm.onsubmit = event => {
+      event.preventDefault();
+      const minutes = Number(this.elements.etaMinutes.value);
+      if (Number.isFinite(minutes) && minutes >= 1) this.chooseEta(Math.min(1440, Math.round(minutes)));
+      else this.elements.etaMinutes.focus();
+    };
+    this.elements.etaSkip.onclick = () => this.chooseEta(null);
+    this.elements.etaCancel.onclick = () => this.closeEtaPrompt();
+    this.elements.celebrateDisplay.onclick = () => this.dismissCelebration();
+    this.document.addEventListener("keydown", event => {
+      if (event.key !== "Escape") return;
+      if (this.etaPrompt) this.closeEtaPrompt();
+      else this.dismissCelebration();
+    });
   }
 
   setPage(page) {
@@ -417,6 +645,18 @@ class FocusApp {
     this.elements.brainDumpClose.setAttribute("aria-label", "Open brain dump");
   }
 
+  toggleMusicPanel() {
+    const isOpen = this.elements.focusMusicPanel.classList.toggle("is-open");
+    this.elements.focusMusicToggle.setAttribute("aria-expanded", String(isOpen));
+    this.elements.focusMusicToggle.title = isOpen ? "Collapse Music" : "Focus Music";
+  }
+
+  collapseMusicPanel() {
+    this.elements.focusMusicPanel.classList.remove("is-open");
+    this.elements.focusMusicToggle.setAttribute("aria-expanded", "false");
+    this.elements.focusMusicToggle.title = "Focus Music";
+  }
+
   askForDailyTarget() {
     const today = this.today();
     if (this.store.state.dailyTarget?.date === today) return;
@@ -438,12 +678,8 @@ class FocusApp {
     const activeTask = hasActiveTask ? this.store.findTask(this.store.state.active) : null;
     this.elements.focusNowWidget.hidden = !activeTask;
     this.updateFullscreenButtonState();
-    this.elements.date.textContent = new Date().toLocaleDateString([], {
-      weekday: "long",
-      month: "long",
-      day: "numeric"
-    });
     this.renderClock();
+    this.renderStats();
     this.renderPomodoro();
     this.renderPomodoroSettings();
     this.elements.brainDump.value = this.store.state.brainDump;
@@ -576,26 +812,32 @@ class FocusApp {
     });
     const pomodoro = this.store.state.pomodoro;
     const timerRunning = Boolean(pomodoro && !pomodoro.paused && this.store.state.active);
+
     this.elements.liveTime.textContent = currentTime;
     this.elements.liveTime.hidden = !timerRunning;
-    this.elements.date.style.visibility = timerRunning ? "hidden" : "visible";
+
+    // The date's visibility is owned by CSS (data-pomodoro-state / data-countdown-state), not set here.
     if (!timerRunning) this.elements.clock.textContent = currentTime;
   }
 
   renderPomodoro(now = Date.now()) {
     const pomodoro = this.store.state.pomodoro;
-    this.elements.pomodoroDisplay.hidden = !pomodoro;
-    this.elements.clockPanel.dataset.pomodoroState = !pomodoro
+    
+    // The label row is always there (same layout idle and running); only the reset button needs an active task.
+    const running = Boolean(pomodoro && this.store.state.active);
+    this.elements.pomodoroReset.disabled = !running;
+    this.elements.pomodoroReset.dataset.phase = !running ? "idle" : pomodoro.phase === "break" ? "break" : "work";
+    
+    this.elements.centerStage.dataset.pomodoroState = !pomodoro
       ? "idle"
       : pomodoro.paused
         ? "paused"
         : "running";
-    this.elements.skipBreak.hidden = pomodoro?.phase !== "break";
-    this.elements.pomodoroProgressArc.setAttribute("data-phase", pomodoro?.phase || "work");
-    let progress = 0;
-    if (!pomodoro) {
+    
+    if (!running) {
       this.elements.pomodoroPhase.textContent = "Ready to focus";
-    } else {
+    }
+    if (pomodoro) {
       const phaseDuration = Number.isFinite(pomodoro.phaseDurationMs)
         ? pomodoro.phaseDurationMs
         : this.phaseDurationMs(pomodoro.phase);
@@ -603,43 +845,15 @@ class FocusApp {
         ? pomodoro.remainingMs
         : pomodoro.phaseEndsAt - now;
       const clampedRemaining = Math.max(0, Math.min(phaseDuration, remaining));
-      const elapsed = phaseDuration - clampedRemaining;
-      progress = elapsed / phaseDuration;
-      this.elements.pomodoroPhase.textContent = `${pomodoro.phase === "break" ? "Break" : "Focus"}${pomodoro.paused ? " paused" : ""}`;
+      
+      // Removed the " paused" text here
+      if (running) this.elements.pomodoroPhase.textContent = pomodoro.phase === "break" ? "Break" : "Focus";
+      
       if (!pomodoro.paused && this.store.state.active) {
         this.elements.clock.textContent = this.formatPomodoroTime(Math.ceil(clampedRemaining / 1000));
       }
     }
 
-    this.elements.pomodoroProgress.setAttribute("aria-valuenow", String(Math.round(progress * 100)));
-    this.elements.pomodoroProgressArc.style.strokeDashoffset = String(100 * (1 - progress));
-  }
-
-  skipBreak() {
-    const pomodoro = this.store.state.pomodoro;
-    if (!pomodoro || pomodoro.phase !== "break") return;
-
-    const now = Date.now();
-    const activeTask = this.store.state.active
-      ? this.store.findTask(this.store.state.active)
-      : null;
-    const phaseDurationMs = this.focusDurationMs();
-    pomodoro.phase = "work";
-    pomodoro.phaseStartedAt = now;
-    pomodoro.phaseDurationMs = phaseDurationMs;
-    pomodoro.phaseEndsAt = now + phaseDurationMs;
-    if (activeTask) {
-      pomodoro.paused = false;
-      delete pomodoro.remainingMs;
-      this.resumeActiveTask(now);
-    } else {
-      pomodoro.paused = true;
-      pomodoro.remainingMs = phaseDurationMs;
-    }
-
-    this.playPhaseSound("work");
-    this.store.save();
-    this.render();
   }
 
   resetPomodoro() {
@@ -729,7 +943,7 @@ class FocusApp {
 
   formatPomodoroTime(seconds) {
     const safeSeconds = Math.max(0, Math.floor(seconds));
-    return `${Math.floor(safeSeconds / 60)}:${String(safeSeconds % 60).padStart(2, "0")}`;
+    return `${String(Math.floor(safeSeconds / 60)).padStart(2, "0")}:${String(safeSeconds % 60).padStart(2, "0")}`;
   }
 
   unlockAudio() {
@@ -793,6 +1007,72 @@ class FocusApp {
     else if (element.webkitRequestFullscreen) element.webkitRequestFullscreen();
   }
 
+  // ---- YouTube video background ----------------------------------------------------------
+  // Accepts watch / youtu.be / embed / shorts / live links or a bare 11-character id.
+  parseYouTubeId(text) {
+    const value = String(text || "").trim();
+    if (/^[\w-]{11}$/.test(value)) return value;
+    let url;
+    try { url = new URL(/^[a-z]+:\/\//i.test(value) ? value : `https://${value}`); } catch { return null; }
+    const host = url.hostname.replace(/^(www|m|music)\./, "");
+    let id = null;
+    if (host === "youtu.be") id = url.pathname.split("/")[1];
+    else if (host === "youtube.com" || host === "youtube-nocookie.com") {
+      const [, kind, second] = url.pathname.split("/");
+      id = kind === "watch" ? url.searchParams.get("v") : ["embed", "shorts", "live", "v"].includes(kind) ? second : null;
+    }
+    return id && /^[\w-]{11}$/.test(id) ? id : null;
+  }
+
+  applyBackgroundVideoInput() {
+    const id = this.parseYouTubeId(this.elements.backgroundVideoUrl.value);
+    if (!id) {
+      this.showBackgroundVideoStatus("That doesn't look like a YouTube link.", true);
+      return;
+    }
+    this.setBackgroundVideo(id);
+  }
+
+  showBackgroundVideoStatus(message, isError = false) {
+    const status = this.elements.backgroundVideoStatus;
+    status.textContent = message;
+    status.classList.toggle("is-error", isError);
+  }
+
+  // Looping, muted, controls-free iframe behind everything (CSS: .bg-video). The still image stays
+  // underneath as the fallback while the video loads or if YouTube refuses to play it.
+  setBackgroundVideo(id, persist = true) {
+    this.document.getElementById("bgVideo")?.remove();
+    this.elements.backgroundVideoClear.hidden = !id;
+    if (!id) {
+      if (persist) { localStorage.removeItem("focus-background-video"); window.dispatchEvent(new Event("focus-changed")); }
+      this.showBackgroundVideoStatus("");
+      return;
+    }
+    const params = new URLSearchParams({
+      autoplay: "1", mute: "1", controls: "0", loop: "1", playlist: id, playsinline: "1",
+      modestbranding: "1", rel: "0", disablekb: "1", iv_load_policy: "3", fs: "0"
+    });
+    const wrap = this.document.createElement("div");
+    wrap.id = "bgVideo";
+    wrap.className = "bg-video";
+    wrap.setAttribute("aria-hidden", "true");
+    const frame = this.document.createElement("iframe");
+    frame.src = `https://www.youtube-nocookie.com/embed/${id}?${params}`;
+    frame.allow = "autoplay; encrypted-media";
+    frame.referrerPolicy = "strict-origin-when-cross-origin";
+    frame.tabIndex = -1;
+    frame.title = "Background video";
+    frame.onload = () => wrap.classList.add("is-ready");
+    wrap.appendChild(frame);
+    this.document.body.prepend(wrap);
+    this.elements.backgroundVideoUrl.value = `https://youtu.be/${id}`;
+    this.showBackgroundVideoStatus(location.protocol === "file:"
+      ? "Playing. If the video stays black, YouTube blocks players on pages opened as files (error 153): serve the folder over http, e.g. VS Code Live Server."
+      : "Playing.");
+    if (persist) localStorage.setItem("focus-background-video", id); if (persist) window.dispatchEvent(new Event("focus-changed"));
+  }
+
   setBackgroundImage(image, persist = true) {
     if (!FocusApp.BACKGROUNDS.includes(image)) return;
     this.selectedBackgroundImage = image;
@@ -802,9 +1082,95 @@ class FocusApp {
       choice.classList.toggle("selected", selected);
       choice.setAttribute("aria-pressed", String(selected));
     });
-    if (persist) localStorage.setItem("focus-background-image", image);
+    if (persist) localStorage.setItem("focus-background-image", image); if (persist) window.dispatchEvent(new Event("focus-changed"));
   }
 
+
+  // ---- Clock fonts ------------------------------------------------------------
+  // "Jost-VariableFont_wght.ttf" -> Jost (variable); "Unkempt-Bold.ttf" -> Unkempt 700;
+  // "NationalPark-Regular.otf" -> National Park 400.
+  parseFontFile(name) {
+    const base = name.replace(/\.[^.]+$/, "");
+    const variable = /variable|\[.*wght.*\]/i.test(base);
+    const [rawFamily, ...rest] = base.split(/[-_]/);
+    const family = rawFamily.replace(/([a-z])([A-Z])/g, "$1 $2").trim();
+    const style = rest.join(" ").toLowerCase();
+    const weights = [["thin", 100], ["extralight", 200], ["ultralight", 200], ["semibold", 600], ["demibold", 600],
+      ["extrabold", 800], ["ultrabold", 800], ["light", 300], ["medium", 500], ["bold", 700], ["black", 900], ["heavy", 900]];
+    const weight = variable ? 400 : (weights.find(([word]) => style.includes(word))?.[1] ?? 400);
+    return { family, weight, variable, italic: /italic|oblique/.test(style) };
+  }
+
+  async loadClockFonts() {
+    const files = new Map();                       // file name -> src
+    const add = (name, src) => { if (!files.has(name)) files.set(name, src); };
+    FocusApp.BUNDLED_FONT_FILES.forEach(name => add(name, new URL(`fonts/${name}`, location.href).href));
+    try {                                          // only works when served with a directory listing
+      const response = await fetch("fonts/");
+      if (response.ok) {
+        const html = await response.text();
+        for (const match of html.matchAll(/href="([^"]+\.(?:ttf|otf|woff2?))"/gi)) {
+          const name = decodeURIComponent(match[1].split("/").pop());
+          add(name, new URL(`fonts/${encodeURIComponent(name)}`, location.href).href);
+        }
+      }
+    } catch { /* file:// or no listing: bundled + added fonts only */ }
+
+    this.clockFonts = new Map();
+    files.forEach((src, name) => {
+      const info = this.parseFontFile(name);
+      if (info.italic) return;
+      const entry = this.clockFonts.get(info.family) || { family: info.family, faces: [] };
+      entry.faces.push({ ...info, src });
+      this.clockFonts.set(info.family, entry);
+    });
+    this.clockFonts.forEach(entry => {
+      // The clock uses the heaviest weight available; variable fonts use 700.
+      const variable = entry.faces.find(face => face.variable);
+      entry.weight = variable ? 700 : Math.max(...entry.faces.map(face => face.weight));
+    });
+    this.installFontStyles();
+    if (!this.clockFonts.has(this.clockFont)) this.clockFont = this.clockFonts.has(FocusApp.DEFAULT_CLOCK_FONT)
+      ? FocusApp.DEFAULT_CLOCK_FONT : [...this.clockFonts.keys()][0];
+    this.renderClockFontChoices();
+    if (this.clockFont) this.setClockFont(this.clockFont, false);
+  }
+
+  // One <style> with every @font-face, kept in sync in the page and in the PiP window.
+  installFontStyles() {
+    const css = [...this.clockFonts.values()].flatMap(entry => entry.faces.map(face =>
+      `@font-face{font-family:"${entry.family}";src:url("${face.src}");font-weight:${face.variable ? "100 900" : face.weight};font-display:swap}`)).join("\n");
+    const docs = [document];
+    const pip = window.documentPictureInPicture?.window;
+    if (pip) docs.push(pip.document);
+    docs.forEach(doc => {
+      let style = doc.getElementById("clockFontFaces");
+      if (!style) { style = doc.createElement("style"); style.id = "clockFontFaces"; doc.head.appendChild(style); }
+      style.textContent = css;
+    });
+  }
+
+  // The font is set on #centerStage itself, so it follows the panel into the PiP window.
+  setClockFont(family, persist = true) {
+    this.clockFont = family;
+    const panel = this.elements.centerStage;
+    panel.style.setProperty("--clock-font", `"${family}"`);
+    panel.style.setProperty("--clock-weight", String(this.clockFonts.get(family)?.weight ?? 700));
+    this.elements.clockFontChoices.querySelectorAll("[data-font]").forEach(choice => {
+      const selected = choice.dataset.font === family;
+      choice.classList.toggle("selected", selected);
+      choice.setAttribute("aria-pressed", String(selected));
+    });
+    if (persist) localStorage.setItem("focus-clock-font", family); if (persist) window.dispatchEvent(new Event("focus-changed"));
+  }
+
+  renderClockFontChoices() {
+    this.elements.clockFontChoices.innerHTML = [...this.clockFonts.values()].map(font =>
+      `<button class="font-choice" type="button" data-font="${this.escape(font.family)}" aria-pressed="false"><span class="font-choice-sample" style="font-family:'${this.escape(font.family)}',Impact,sans-serif;font-weight:${font.weight}">12:34</span><span class="font-choice-name">${this.escape(font.family)}</span></button>`
+    ).join("");
+    this.elements.clockFontChoices.querySelectorAll("[data-font]").forEach(choice =>
+      choice.classList.toggle("selected", choice.dataset.font === this.clockFont));
+  }
 
   renderBackgroundChoices() {
     this.elements.backgroundChoices.innerHTML = FocusApp.BACKGROUNDS.map(image =>
@@ -849,11 +1215,6 @@ class FocusApp {
     });
   }
 
-  toggleCategoryEditor() {
-    this.elements.categoryEditor.hidden = !this.elements.categoryEditor.hidden;
-    if (!this.elements.categoryEditor.hidden) this.renderCategoryEditor();
-  }
-
   changeCategoryColor(id, color) {
     const category = this.store.state.categories.find(item => item.id === id);
     if (!category) return;
@@ -894,19 +1255,38 @@ class FocusApp {
       .sort((first, second) => (first.created || 0) - (second.created || 0));
     const todaysTasks = this.store.state.tasks
       .filter(task => task.date === this.today())
-      .filter(task => this.focusCategory === "all" || task.category === this.focusCategory)
       .sort((first, second) => (first.created || 0) - (second.created || 0));
 
+    // 1. Render tasks for the main Tasks page
     this.renderTaskList(this.elements.tasks, tasks);
-    this.renderTaskList(this.elements.focusTasks, todaysTasks);
+    
+    // 2. Render tasks into the new PiP dropdown
+    this.elements.focusTasksList.innerHTML = todaysTasks.length
+      ? todaysTasks.map(task => this.taskMarkup(task)).join("")
+      : '<div class="empty" style="padding: 20px; font-size: 1.2em;">No tasks today.</div>';
+      
+    // 3. Update the task counter badge in the dropdown header
+    this.elements.focusTasksCount.textContent = todaysTasks.length;
+
+    // 4. Toggle the visibility between the Active Widget and the Idle Dropdown
     const activeTask = this.store.state.active
       ? this.store.findTask(this.store.state.active)
       : null;
+      
     this.elements.focusNowWidget.hidden = !activeTask;
+    this.elements.focusIdleWidget.hidden = Boolean(activeTask);
+
+    // 5. If a task is currently active, force-close the dropdown so it doesn't overlap the timer
+    if (activeTask) this.closeFocusTasks();
+
+    // 6. Render the active task widget
     this.elements.focusNowTask.innerHTML = activeTask ? this.taskMarkup(activeTask, true) : "";
-    this.bindTaskEvents(this.elements.tasks);
-    this.bindTaskEvents(this.elements.focusTasks);
-    this.bindTaskEvents(this.elements.focusNowTask);
+    
+    // 7. Bind events to the tasks in all three places
+    this.bindTaskEvents(this.elements.tasks);            // Main Tasks page
+    this.bindTaskEvents(this.elements.focusTasksList);   // The new dropdown
+    this.bindTaskEvents(this.elements.focusNowTask);     // The active task widget
+    
     this.restoreExpandedTask();
   }
 
@@ -950,11 +1330,16 @@ class FocusApp {
   }
 
   renderLiveTimers() {
-    [this.elements.tasks, this.elements.focusTasks, this.elements.focusNowTask].forEach(container => {
+    // Changed this.elements.focusTasks to this.elements.focusTasksList
+    [this.elements.tasks, this.elements.focusTasksList, this.elements.focusNowTask].forEach(container => {
+      if (!container) return;
       container.querySelectorAll(".task[data-task-id]").forEach(taskElement => {
         const task = this.store.findTask(taskElement.dataset.taskId);
+        if (!task) return;
+        const eta = taskElement.querySelector(".eta");
+        if (eta) eta.textContent = this.etaText(task);
         const timer = taskElement.querySelector(".timer");
-        if (!task || !timer) return;
+        if (!timer) return;
 
         const duration = this.duration(this.taskDuration(task));
         timer.textContent = task.end && this.store.state.active !== task.id
@@ -982,28 +1367,80 @@ class FocusApp {
       const label = hour === 24 ? "24" : String(hour).padStart(2, "0");
       return `<div class="timeline-hour" style="--hour-top:${position}%"><span>${label}:00</span></div>`;
     }).join("");
-    const events = [];
-
+    // 1. Collect this day's sessions per task, then fuse sessions of the same task that are
+    //    less than MERGE_GAP apart (or overlap) into one continuous block.
+    const MERGE_GAP = 10 * 60 * 1000;
+    const HOUR_PX = 60;                       // must match the grid height set above
+    const MIN_BLOCK_MS = (17 / HOUR_PX) * 60 * 60 * 1000;   // a block is never drawn shorter than 17px
+    const blocks = [];
     this.store.state.tasks.forEach(task => {
-      const sessions = this.taskSessions(task, now);
-
       const category = this.store.state.categories.find(item => item.id === task.category);
-      sessions.forEach(session => {
-        const start = new Date(session.start).getTime();
-        const end = new Date(session.end).getTime();
-        if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return;
-        const clippedStart = Math.max(start, dayStart);
-        const clippedEnd = Math.min(end, dayEnd);
-        if (clippedEnd <= clippedStart) return;
-
-        const top = ((clippedStart - dayStart) / dayLength) * 100;
-        const height = ((clippedEnd - clippedStart) / dayLength) * 100;
-        const startLabel = this.formatTime(clippedStart);
-        const endLabel = this.formatTime(clippedEnd);
-        const categoryColor = category?.color || "#999";
-        events.push(`<div class="timeline-event" style="--event-color:${this.escape(categoryColor)};border-left:4px solid ${this.escape(categoryColor)};--event-top:${top}%;--event-height:${height}%" title="${this.escape(task.name)} · ${startLabel}–${endLabel}">${this.escape(task.name)}</div>`);
+      const spans = this.taskSessions(task, now)
+        .map(session => ({
+          start: Math.max(new Date(session.start).getTime(), dayStart),
+          end: Math.min(new Date(session.end).getTime(), dayEnd)
+        }))
+        .filter(span => Number.isFinite(span.start) && Number.isFinite(span.end) && span.end > span.start)
+        .sort((first, second) => first.start - second.start);
+      let current = null;
+      spans.forEach(span => {
+        if (current && span.start - current.end < MERGE_GAP) {
+          current.focusMs += Math.max(0, span.end - Math.max(span.start, current.end));
+          current.end = Math.max(current.end, span.end);
+          current.sessions += 1;
+        } else {
+          current = { task, category, start: span.start, end: span.end, focusMs: span.end - span.start, sessions: 1 };
+          blocks.push(current);
+        }
       });
     });
+
+    // 2. Blocks of different tasks that overlap in time sit side by side instead of on top of each other.
+    blocks.sort((first, second) => first.start - second.start || second.end - first.end);
+    let cluster = [], clusterEnd = 0;
+    const closeCluster = () => {
+      const lanes = cluster.reduce((max, block) => Math.max(max, block.lane + 1), 1);
+      cluster.forEach(block => { block.lanes = lanes; });
+      cluster = [];
+    };
+    const laneEnds = [];
+    blocks.forEach(block => {
+      block.visualEnd = Math.max(block.end, block.start + MIN_BLOCK_MS);
+      if (cluster.length && block.start >= clusterEnd) { closeCluster(); laneEnds.length = 0; clusterEnd = 0; }
+      let lane = laneEnds.findIndex(end => end <= block.start);
+      if (lane === -1) lane = laneEnds.length;
+      laneEnds[lane] = block.visualEnd;
+      block.lane = lane;
+      cluster.push(block);
+      clusterEnd = Math.max(clusterEnd, block.visualEnd);
+    });
+    if (cluster.length) closeCluster();
+
+    // 3. Markup.
+    let totalFocusMs = 0;
+    const events = blocks.map(block => {
+      totalFocusMs += block.focusMs;
+      const top = ((block.start - dayStart) / dayLength) * 100;
+      const height = ((block.end - block.start) / dayLength) * 100;
+      const heightPx = ((block.end - block.start) / 3600000) * HOUR_PX;
+      const color = this.escape(block.category?.color || "#999");
+      const range = `${this.formatTime(block.start)}–${this.formatTime(block.end)}`;
+      const live = isToday && this.store.state.active === block.task.id && block.end >= now - 1000;
+      const detail = `${block.task.name}${block.category ? ` · ${block.category.name}` : ""}\n${range} · ${this.duration(block.focusMs)} focused${block.sessions > 1 ? ` (${block.sessions} sessions merged)` : ""}`;
+      const time = heightPx >= 38 ? `<span class="timeline-event-time">${range}</span>` : "";
+      return `<div class="timeline-event${heightPx < 22 ? " is-short" : ""}${live ? " is-live" : ""}" style="--event-color:${color};--event-top:${top}%;--event-height:${height}%;--lane:${block.lane};--lanes:${block.lanes}" title="${this.escape(detail)}"><span class="timeline-event-name">${this.escape(block.task.name)}</span>${time}</div>`;
+    });
+
+    this.elements.calendarDate.textContent = (isToday
+      ? "Today"
+      : new Date(year, month - 1, day).toLocaleDateString([], { month: "short", day: "numeric" }))
+      + (totalFocusMs ? ` · ${this.duration(totalFocusMs)}` : "");
+    this.elements.calendarDate.title = isToday ? "Click to jump to now" : "";
+    this.elements.calendarDate.onclick = () => {
+      if (!isToday) return;
+      const target = ((Date.now() - dayStart) / dayLength) * this.elements.taskCalendar.scrollHeight - this.elements.calendarScroll.clientHeight / 2;
+      this.elements.calendarScroll.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
+    };
 
     const nowPosition = ((now - dayStart) / dayLength) * 100;
     const nowMarker = isToday && now >= dayStart && now < dayEnd
@@ -1063,22 +1500,113 @@ class FocusApp {
     const target = this.store.state.dailyTarget;
     const targetMilliseconds = target?.date === activeDate ? target.milliseconds : 0;
     const progress = targetMilliseconds ? Math.min(100, (totalMilliseconds / targetMilliseconds) * 100) : 0;
-    this.elements.focusProgress.innerHTML = targetMilliseconds
-      ? `<div class="focus-goal-label"><span>Daily target</span><span>${this.duration(targetMilliseconds)}</span></div><div class="focus-goal-track" role="progressbar" aria-label="Daily focus target progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(progress)}"><div class="focus-goal-bar" style="width:${progress}%"></div></div>`
-      : '<div class="focus-goal-empty">No focus target set for this day.</div>';
-    this.elements.focusBreakdown.innerHTML = totals.length
-      ? totals.map(category => {
-        const percentage = totalMilliseconds ? (category.milliseconds / totalMilliseconds) * 100 : 0;
-        return `<div class="focus-row">
-          <div class="focus-row-head"><span><span class="dot" style="background:${this.escape(category.color)}"></span>${this.escape(category.name)}</span><span>${this.duration(category.milliseconds)}</span></div>
-          <div class="focus-track"><div class="focus-bar" style="width:${percentage}%;background:${this.escape(category.color)}"></div></div>
-        </div>`;
-      }).join("")
-      : '<div class="focus-empty">No categories yet.</div>';
+    // Daily target bar, fragmented by category. Segment width = share of the target
+    // (or of the total once the target is exceeded, so the bar never overflows).
+    const withTime = totals.filter(category => category.milliseconds > 0);
+    const legend = totals.length
+      ? `<div class="focus-legend" aria-label="Category colours">${totals.map(category =>
+        `<span class="focus-legend-item"><span class="dot" style="background:${this.escape(category.color)}"></span>${this.escape(category.name)}</span>`).join("")}</div>`
+      : "";
+    if (targetMilliseconds) {
+      const scale = Math.max(targetMilliseconds, totalMilliseconds);
+      const segments = withTime.map(category =>
+        `<span class="focus-goal-segment" style="width:${(category.milliseconds / scale) * 100}%;background:${this.escape(category.color)}" data-name="${this.escape(category.name)}" data-time="${this.escape(this.duration(category.milliseconds))}" data-color="${this.escape(category.color)}"></span>`).join("");
+      this.elements.focusProgress.innerHTML = `<div class="focus-goal-label"><span>Daily target</span><span>${this.duration(totalMilliseconds)} / ${this.duration(targetMilliseconds)}</span></div>
+        <div class="focus-goal-wrap"><div class="focus-goal-track" role="progressbar" aria-label="Daily focus target progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(progress)}">${segments}</div><div class="focus-goal-tip" hidden></div></div>${legend}`;
+      const wrap = this.elements.focusProgress.querySelector(".focus-goal-wrap");
+      const tip = wrap.querySelector(".focus-goal-tip");
+      wrap.onmousemove = event => {
+        const segment = event.target.closest(".focus-goal-segment");
+        if (!segment) { tip.hidden = true; return; }
+        tip.innerHTML = `<span class="dot" style="background:${segment.dataset.color}"></span><b>${segment.dataset.name}</b> ${segment.dataset.time}`;
+        tip.hidden = false;
+        const box = wrap.getBoundingClientRect();
+        tip.style.left = `${Math.min(Math.max(event.clientX - box.left, tip.offsetWidth / 2), box.width - tip.offsetWidth / 2)}px`;
+      };
+      wrap.onmouseleave = () => { tip.hidden = true; };
+    } else {
+      this.elements.focusProgress.innerHTML = `<div class="focus-goal-empty">No focus target set for this day.</div>${legend}`;
+    }
+  }
+
+
+  // ---- Colour helpers (OKLCH) ------------------------------------------------
+  // Category colours are arbitrary, so ramps/lines are built in a perceptual space:
+  // hue is kept, lightness is chosen for the dark UI, chroma is clipped to the sRGB gamut.
+  parseColor(value) {
+    let hex = String(value || "").trim().replace("#", "");
+    if (hex.length === 3) hex = hex.split("").map(ch => ch + ch).join("");
+    if (!/^[0-9a-f]{6}$/i.test(hex)) hex = "999999";
+    return [0, 2, 4].map(i => parseInt(hex.slice(i, i + 2), 16) / 255);
+  }
+
+  toOklch(value) {
+    const lin = c => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+    const [r, g, b] = this.parseColor(value).map(lin);
+    const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+    const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+    const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+    const L = 0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s;
+    const A = 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s;
+    const B = 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s;
+    return { L, C: Math.hypot(A, B), H: Math.atan2(B, A) };
+  }
+
+  fromOklch(L, C, H) {
+    const gamma = c => (c <= 0.0031308 ? 12.92 * c : 1.055 * Math.max(c, 0) ** (1 / 2.4) - 0.055);
+    const convert = chroma => {
+      const a = chroma * Math.cos(H), b = chroma * Math.sin(H);
+      const l = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3;
+      const m = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3;
+      const s = (L - 0.0894841775 * a - 1.291485548 * b) ** 3;
+      return [
+        4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+        -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+        -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s
+      ];
+    };
+    let chroma = C, rgb = convert(chroma);
+    const inGamut = v => v.every(c => c >= -0.0005 && c <= 1.0005);
+    for (let i = 0; i < 24 && !inGamut(rgb); i += 1) { chroma *= 0.92; rgb = convert(chroma); }
+    return "#" + rgb.map(c => Math.round(Math.min(1, Math.max(0, gamma(c))) * 255).toString(16).padStart(2, "0")).join("");
+  }
+
+  // Five steps from "barely there" to "bright", same hue, always lighter than the empty cell.
+  activityRamp(color) {
+    const { C, H } = this.toOklch(color);
+    const grey = C < 0.03;                       // near-grey categories stay neutral instead of inventing a hue
+    const chroma = grey ? C : Math.min(0.17, Math.max(0.09, C));
+    return [[0.36, 0.55], [0.48, 0.8], [0.6, 1], [0.72, 1], [0.84, 0.85]]
+      .map(([L, k]) => this.fromOklch(L, chroma * k, H));
+  }
+
+  // The category colour for thin lines on the dark UI: untouched when already readable.
+  readableColor(color) {
+    const { L, C, H } = this.toOklch(color);
+    if (L >= 0.62) return this.fromOklch(L, C, H);
+    return this.fromOklch(0.68, Math.max(C, 0.1), H);
   }
 
   renderActivityCalendar(now = Date.now()) {
     const currentYear = new Date(now).getFullYear();
+
+    // --- 1. NEW: Populate the Category Dropdown ---
+    const catOptions = [`<option value="all">All categories</option>`];
+    this.store.state.categories.forEach(c => catOptions.push(`<option value="${this.escape(c.id)}">${this.escape(c.name)}</option>`));
+    this.elements.activityCategoryFilter.innerHTML = catOptions.join("");
+    this.elements.activityCategoryFilter.value = this.selectedActivityCategory;
+    this.elements.activityCategoryFilter.onchange = (e) => {
+      this.selectedActivityCategory = e.target.value;
+      this.renderActivityCalendar(); // Re-render immediately when changed
+    };
+
+    const selectedCategoryObj = this.store.state.categories.find(c => c.id === this.selectedActivityCategory);
+    // One perceptual ramp per category (see activityRamp); "All categories" uses the default green.
+    this.activityRamp(selectedCategoryObj?.color || "#39d353").forEach((color, index) => {
+      this.elements.activityCard.style.setProperty(`--level-${index + 1}`, color);
+    });
+
+    // --- 2. Existing Year Logic ---
     const availableYears = new Set(Array.from({ length: 10 }, (_, index) => currentYear - index));
     this.store.state.tasks.forEach(task => {
       this.taskSessions(task, now).forEach(session => {
@@ -1110,6 +1638,7 @@ class FocusApp {
       }
     };
 
+    // --- 3. Existing Date Setup ---
     const year = this.selectedActivityYear;
     const yearStart = new Date(year, 0, 1);
     const yearEnd = new Date(year + 1, 0, 1);
@@ -1125,8 +1654,12 @@ class FocusApp {
       if (date >= yearStart && date < yearEnd) totals.set(this.dateKey(date), 0);
     }
 
+    // --- 4. Calculate Totals with NEW Category Filter ---
     const rangeEnd = yearEnd.getTime();
     this.store.state.tasks.forEach(task => {
+      // THE NEW FILTER: Skip this task if a specific category is selected and it doesn't match
+      if (this.selectedActivityCategory !== "all" && task.category !== this.selectedActivityCategory) return;
+
       const sessions = this.taskSessions(task, now);
       sessions.forEach(session => {
         const start = new Date(session.start).getTime();
@@ -1146,18 +1679,23 @@ class FocusApp {
 
     const levelFor = milliseconds => {
       if (milliseconds <= 0) return 0;
-      if (milliseconds < 15 * 60 * 1000) return 1;
-      if (milliseconds < 60 * 60 * 1000) return 2;
-      if (milliseconds < 2 * 60 * 60 * 1000) return 3;
-      return 4;
+      if (milliseconds < 30 * 60 * 1000) return 1;          // Up to 30m
+      if (milliseconds < 2 * 60 * 60 * 1000) return 2;      // 30m to 2h
+      if (milliseconds < 5 * 60 * 60 * 1000) return 3;      // 2h to 5h
+      if (milliseconds < 8 * 60 * 60 * 1000) return 4;      // 5h to 8h
+      return 5;                                             // 8h+
     };
+
+    // --- 5. Render Grid with NEW Dynamic Colors ---
     this.elements.activityGrid.innerHTML = dateKeys.map(date => {
       if (!date) return '<span class="activity-cell activity-padding" aria-hidden="true"></span>';
       const milliseconds = totals.get(date);
       const level = levelFor(milliseconds);
+      
       return `<button class="activity-cell" type="button" data-activity-date="${date}" data-level="${level}" aria-label="${this.escape(this.formatTaskDate(date))}: ${this.escape(this.duration(milliseconds))} focus time" aria-pressed="${date === this.selectedDate}" title="${this.escape(this.formatTaskDate(date))}: ${this.escape(this.duration(milliseconds))}"></button>`;
     }).join("");
 
+    // --- 6. Existing Month Labels & Bindings ---
     const monthLabels = [];
     for (let month = 0; month < 12; month += 1) {
       const monthStart = new Date(year, month, 1);
@@ -1167,9 +1705,11 @@ class FocusApp {
     this.elements.activityMonths.style.setProperty("--activity-weeks", String(weekCount));
     this.elements.activityGrid.style.setProperty("--activity-weeks", String(weekCount));
     this.elements.activityMonths.innerHTML = monthLabels.join("");
+    
     this.elements.activityGrid.querySelectorAll("[data-activity-date]").forEach(button => {
       button.onclick = () => this.selectActivityDate(button.dataset.activityDate);
     });
+    
     this.elements.activityTrendRange.value = this.selectedActivityRange;
     this.elements.activityTrendRange.onchange = () => {
       this.selectedActivityRange = this.elements.activityTrendRange.value;
@@ -1179,13 +1719,44 @@ class FocusApp {
   }
 
   renderActivityTrend(now = Date.now()) {
+    // 1. Populate the Multi-Select Checkboxes (Max 5)
+    if (this.selectedTrendCategories.length === 0 && this.store.state.categories.length > 0) {
+      this.selectedTrendCategories = this.store.state.categories.slice(0, 5).map(c => c.id);
+    }
+
+    this.elements.trendMultiCount.textContent = `(${this.selectedTrendCategories.length}/5)`;
+    
+    this.elements.trendMultiContent.innerHTML = this.store.state.categories.map(category => {
+      const checked = this.selectedTrendCategories.includes(category.id);
+      const isMax = this.selectedTrendCategories.length >= 5;
+      const disabled = !checked && isMax;
+      
+      return `<label class="${disabled ? "disabled" : ""}">
+        <input type="checkbox" value="${category.id}" ${checked ? "checked" : ""} ${disabled ? "disabled" : ""}>
+        ${this.escape(category.name)}
+      </label>`;
+    }).join("");
+
+    // Bind checkbox events
+    this.elements.trendMultiContent.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+      cb.onchange = (e) => {
+        const id = e.target.value;
+        if (e.target.checked) {
+          if (this.selectedTrendCategories.length < 5) this.selectedTrendCategories.push(id);
+        } else {
+          this.selectedTrendCategories = this.selectedTrendCategories.filter(cId => cId !== id);
+        }
+        this.renderActivityTrend(now);
+      };
+    });
+
+    // 2. Existing Date/Bucket Logic
     const selectedDate = this.selectedDate.split("-").map(Number);
     const selectedYear = this.selectedActivityYear;
     const anchorDate = selectedDate[0] === selectedYear
       ? new Date(selectedDate[0], selectedDate[1] - 1, selectedDate[2])
       : new Date(selectedYear, 0, 1);
     const buckets = [];
-
     if (this.selectedActivityRange === "daily") {
       for (let hour = 0; hour < 24; hour += 1) {
         const start = new Date(anchorDate.getFullYear(), anchorDate.getMonth(), anchorDate.getDate(), hour);
@@ -1207,9 +1778,7 @@ class FocusApp {
       const month = anchorDate.getMonth();
       const days = new Date(year, month + 1, 0).getDate();
       for (let day = 1; day <= days; day += 1) {
-        const start = new Date(year, month, day);
-        const end = new Date(year, month, day + 1);
-        buckets.push({ start, end, label: String(day) });
+        buckets.push({ start: new Date(year, month, day), end: new Date(year, month, day + 1), label: String(day) });
       }
     } else {
       for (let month = 0; month < 12; month += 1) {
@@ -1221,16 +1790,37 @@ class FocusApp {
       }
     }
 
-    const points = buckets.map(bucket => ({
-      ...bucket,
-      milliseconds: this.focusDurationBetween(bucket.start.getTime(), bucket.end.getTime(), now)
-    }));
-    const activePoints = points.filter(point => point.milliseconds > 0).length;
+    // 3. Calculate Points per Category
+    const categoryPoints = {}; // { catId: [{x, y, ms, ...bucket}] }
+    
+    // Initialize arrays
+    this.selectedTrendCategories.forEach(id => categoryPoints[id] = []);
+    
+    buckets.forEach(bucket => {
+      const timeWindowStart = bucket.start.getTime();
+      const timeWindowEnd = bucket.end.getTime();
+      
+      this.selectedTrendCategories.forEach(catId => {
+        const ms = this.focusDurationBetween(timeWindowStart, timeWindowEnd, now, catId); // We'll update focusDurationBetween
+        categoryPoints[catId].push({ ...bucket, milliseconds: ms });
+      });
+    });
+
+    // 4. Find Max Y-Value across ALL selected categories
+    let maxValue = 0;
+    this.selectedTrendCategories.forEach(catId => {
+      categoryPoints[catId].forEach(p => {
+        if (p.milliseconds > maxValue) maxValue = p.milliseconds;
+      });
+    });
+
+    const activePoints = Object.values(categoryPoints).flat().filter(p => p.milliseconds > 0).length;
     if (activePoints < 2) {
       this.elements.activityTrendChart.innerHTML = '<p class="focus-trend-empty">Not enough data</p>';
       return;
     }
 
+    // 5. Chart Dimensions
     const width = 640;
     const height = 210;
     const left = 48;
@@ -1239,21 +1829,34 @@ class FocusApp {
     const bottom = 35;
     const chartWidth = width - left - right;
     const chartHeight = height - top - bottom;
-    const maxValue = Math.max(...points.map(point => point.milliseconds));
+    
     const yMax = Math.ceil(maxValue / (60 * 60 * 1000)) * 60 * 60 * 1000 || maxValue;
-    const coordinates = points.map((point, index) => ({
-      ...point,
-      x: left + (index / Math.max(1, points.length - 1)) * chartWidth,
-      y: top + chartHeight - (point.milliseconds / yMax) * chartHeight
-    }));
-    const line = coordinates.map(point => `${point.x},${point.y}`).join(" ");
-    const labelIndexes = new Set([
-      0,
-      Math.round((points.length - 1) / 4),
-      Math.round((points.length - 1) / 2),
-      Math.round((points.length - 1) * 3 / 4),
-      points.length - 1
-    ]);
+
+    // 6. Generate Polylines
+    const polylines = this.selectedTrendCategories.map(catId => {
+      const category = this.store.state.categories.find(c => c.id === catId);
+      if (!category) return "";
+
+      const lineColor = this.readableColor(category.color);
+      const points = categoryPoints[catId].map((point, index) => ({
+        ...point,
+        x: left + (index / Math.max(1, categoryPoints[catId].length - 1)) * chartWidth,
+        y: top + chartHeight - (point.milliseconds / yMax) * chartHeight
+      }));
+
+      const line = points.map(p => `${p.x},${p.y}`).join(" ");
+      const circles = points.map(p =>
+        `<circle class="trend-point" style="fill: ${lineColor}; stroke: var(--card);" cx="${p.x}" cy="${p.y}" r="3"><title>${this.escape(category.name)} ${this.escape(p.label)}: ${this.escape(this.duration(p.milliseconds))}</title></circle>`
+      ).join("");
+
+      return `
+        <polyline class="trend-line" style="stroke: ${lineColor};" points="${line}"></polyline>
+        ${circles}
+      `;
+    }).join("");
+
+    // 7. Labels & Axes (keep existing logic)
+    const labelIndexes = new Set([0, Math.round((buckets.length - 1) / 4), Math.round((buckets.length - 1) / 2), Math.round((buckets.length - 1) * 3 / 4), buckets.length - 1]);
     const yTicks = [0, yMax / 2, yMax];
     const formatAxisDuration = milliseconds => {
       const hours = milliseconds / (60 * 60 * 1000);
@@ -1264,35 +1867,44 @@ class FocusApp {
     const periodCaption = this.selectedActivityRange === "daily"
       ? this.formatTaskDate(this.dateKey(anchorDate))
       : this.selectedActivityRange === "weekly"
-        ? `${this.formatTaskDate(this.dateKey(points[0].start))} – ${this.formatTaskDate(this.dateKey(points[points.length - 1].start))}`
+        ? `${this.formatTaskDate(this.dateKey(buckets[0].start))} – ${this.formatTaskDate(this.dateKey(buckets[buckets.length - 1].start))}`
         : this.selectedActivityRange === "monthly"
           ? anchorDate.toLocaleDateString([], { month: "long", year: "numeric" })
           : String(selectedYear);
+
     const axis = yTicks.map(value => {
       const y = top + chartHeight - (value / yMax) * chartHeight;
       return `<g class="trend-y-tick"><line x1="${left}" y1="${y}" x2="${width - right}" y2="${y}"></line><text x="${left - 8}" y="${y + 4}" text-anchor="end">${formatAxisDuration(value)}</text></g>`;
     }).join("");
-    const xLabels = coordinates.map((point, index) => labelIndexes.has(index)
-      ? `<text class="trend-x-label" x="${point.x}" y="${height - 12}" text-anchor="middle">${this.escape(point.label)}</text>`
-      : "").join("");
-    const circles = coordinates.map(point =>
-      `<circle class="trend-point" cx="${point.x}" cy="${point.y}" r="3"><title>${this.escape(point.label)}: ${this.escape(this.duration(point.milliseconds))}</title></circle>`
-    ).join("");
+    
+    const xLabels = buckets.map((bucket, index) => {
+      if (!labelIndexes.has(index)) return "";
+      const x = left + (index / Math.max(1, buckets.length - 1)) * chartWidth;
+      return `<text class="trend-x-label" x="${x}" y="${height - 12}" text-anchor="middle">${this.escape(bucket.label)}</text>`;
+    }).join("");
 
-    this.elements.activityTrendChart.innerHTML = `<div class="focus-trend-caption">${rangeLabel} focus time · ${this.escape(periodCaption)}</div><svg class="focus-trend-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${rangeLabel} focus time trend">
-      ${axis}<polyline class="trend-line" points="${line}"></polyline>${circles}${xLabels}
-    </svg>`;
+    // 8. Render SVG
+    this.elements.activityTrendChart.innerHTML = `
+      <div class="focus-trend-caption">${rangeLabel} focus time · ${this.escape(periodCaption)}</div>
+      <svg class="focus-trend-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${rangeLabel} focus time trend">
+        ${axis}
+        ${polylines}
+        ${xLabels}
+      </svg>`;
   }
 
-  focusDurationBetween(startTime, endTime, now = Date.now()) {
+  focusDurationBetween(startTime, endTime, now = Date.now(), categoryId = null) {
     const clippedEnd = Math.min(endTime, now);
     if (clippedEnd <= startTime) return 0;
-    return this.store.state.tasks.reduce((total, task) => total + this.taskSessions(task, now).reduce((taskTotal, session) => {
-      const sessionStart = new Date(session.start).getTime();
-      const sessionEnd = new Date(session.end).getTime();
-      if (!Number.isFinite(sessionStart) || !Number.isFinite(sessionEnd) || sessionEnd <= sessionStart) return taskTotal;
-      return taskTotal + Math.max(0, Math.min(sessionEnd, clippedEnd) - Math.max(sessionStart, startTime));
-    }, 0), 0);
+    
+    return this.store.state.tasks
+      .filter(task => categoryId ? task.category === categoryId : true)
+      .reduce((total, task) => total + this.taskSessions(task, now).reduce((taskTotal, session) => {
+        const sessionStart = new Date(session.start).getTime();
+        const sessionEnd = new Date(session.end).getTime();
+        if (!Number.isFinite(sessionStart) || !Number.isFinite(sessionEnd) || sessionEnd <= sessionStart) return taskTotal;
+        return taskTotal + Math.max(0, Math.min(sessionEnd, clippedEnd) - Math.max(sessionStart, startTime));
+      }, 0), 0);
   }
 
   focusDurationOnDate(task, dateKey, now = Date.now()) {
@@ -1341,7 +1953,7 @@ class FocusApp {
           <div class="task-name"><span class="task-priority-dot" aria-hidden="true"></span><span class="task-name-text">${this.escape(task.name)}</span></div>
           ${category ? `<div class="category">${this.escape(category)}</div>` : ""}
         </div>
-          ${timer}<div class="task-actions">${sessionButton}</div>
+          ${this.etaMarkup(task)}${timer}<div class="task-actions">${sessionButton}</div>
         </div><div class="task-details" data-task-id="${this.escape(task.id)}" hidden>${this.taskDetailsMarkup(task)}</div></div>`;
   }
 
@@ -1356,6 +1968,7 @@ class FocusApp {
         }).join("")}</ol>`
       : '<span class="task-no-sessions">No focus sessions recorded</span>';
       
+    const estimateMinutes = Number.isFinite(task.estimateMs) && task.estimateMs > 0 ? Math.round(task.estimateMs / 60000) : "";
     const completionTime = task.done
       ? task.completedAt ? this.formatDateTime(task.completedAt) : "Time not recorded"
       : "—";
@@ -1371,7 +1984,7 @@ class FocusApp {
 
     return `<div class="task-detail-head">
         ${isNew ? '' : `<button class="task-detail-check${task.done ? " is-done" : ""}" type="button" data-action="toggle-draft" aria-label="${task.done ? "Mark incomplete" : "Mark complete"}"></button>`}
-        <input class="task-detail-name" type="text" value="${this.escape(task.name)}" aria-label="Task name" autocomplete="off" placeholder="What needs your focus?">
+        <input class="ui-field task-detail-name" type="text" value="${this.escape(task.name)}" aria-label="Task name" autocomplete="off" placeholder="What needs your focus?">
         ${isNew ? '' : `<button class="task-detail-delete" type="button" data-action="delete" aria-label="Delete task" title="Delete task">
           <img src="icons/trash.svg" alt="">
         </button>`}
@@ -1379,21 +1992,33 @@ class FocusApp {
       <div class="task-detail-fields">
         <label class="task-detail-field">
           <span>Planned date</span>
-          <input type="date" class="task-detail-date" value="${this.escape(task.date || "")}">
+          <input type="date" class="ui-field task-detail-date" value="${this.escape(task.date || "")}">
         </label>
         <label class="task-detail-field">
           <span>Category</span>
-          <select class="task-detail-category">${categoryOptions}</select>
+          <select class="ui-control task-detail-category">${categoryOptions}</select>
         </label>
         <label class="task-detail-field">
           <span>Priority</span>
-          <select class="task-detail-priority">
+          <select class="ui-control task-detail-priority">
             <option value="high"${priority === "high" ? " selected" : ""}>High priority</option>
             <option value="medium"${priority === "medium" ? " selected" : ""}>Medium priority</option>
             <option value="low"${priority === "low" ? " selected" : ""}>Low priority</option>
           </select>
         </label>
+        <label class="task-detail-field">
+          <span>Estimated time (min)</span>
+          <input type="number" class="ui-field task-detail-estimate" min="1" max="1440" step="1" inputmode="numeric" placeholder="None" value="${estimateMinutes}">
+        </label>
       </div>
+
+      ${isNew ? '' : `
+      <dl class="task-properties task-meta">
+        <div><dt>Created</dt><dd>${this.escape(this.formatDateTime(task.created))}</dd></div>
+        <div><dt>Completed at</dt><dd>${this.escape(completionTime)}</dd></div>
+        ${task.raindropsEarned ? `<div><dt>Raindrops earned</dt><dd>${task.raindropsEarned}</dd></div>` : ""}
+      </dl>
+      `}
       
       ${isNew ? '' : `
       <details class="task-detail-sessions">
@@ -1402,8 +2027,6 @@ class FocusApp {
           <span class="task-detail-sessions-total">${this.duration(this.taskDuration(task))}</span>
         </summary>
         <dl class="task-properties">
-          <div><dt>Created</dt><dd>${this.escape(this.formatDateTime(task.created))}</dd></div>
-          <div><dt>Completed at</dt><dd>${this.escape(completionTime)}</dd></div>
           <div class="task-session-property"><dt>Sessions</dt><dd>${sessionList}</dd></div>
         </dl>
       </details>
@@ -1443,6 +2066,8 @@ class FocusApp {
       };
       taskElement.onclick = event => {
         if (event.target.closest("button, input, select, .check")) return;
+        // The details modal lives in the main window, so rows shown inside the PiP window don't open it.
+        if (taskElement.ownerDocument !== this.document) return;
         const taskRow = taskElement.closest(".task-row");
         
         // If this task is already the one open, close it
@@ -1534,6 +2159,10 @@ class FocusApp {
         const newDate = details.querySelector(".task-detail-date").value;
         const newCategory = details.querySelector(".task-detail-category").value;
         const newPriority = details.querySelector(".task-detail-priority").value;
+        const estimateMinutes = Number(details.querySelector(".task-detail-estimate").value);
+        const newEstimateMs = Number.isFinite(estimateMinutes) && estimateMinutes >= 1
+          ? Math.min(1440, Math.round(estimateMinutes)) * 60 * 1000
+          : undefined;
 
         if (isNew) {
           // Create new task
@@ -1545,7 +2174,8 @@ class FocusApp {
             date: this.isDateKey(newDate) ? newDate : this.today(),
             created: Date.now(),
             sessions: [],
-            done: false
+            done: false,
+            estimateMs: newEstimateMs
           });
         } else {
           // Update existing task
@@ -1553,13 +2183,25 @@ class FocusApp {
           if (this.isDateKey(newDate)) task.date = newDate;
           task.category = newCategory;
           task.priority = newPriority;
-          
-          const isDone = details.querySelector('[data-action="toggle-draft"]').classList.contains("is-done");
-          if (task.done !== isDone) {
-            task.done = isDone;
-            task.completedAt = task.done ? new Date().toISOString() : undefined;
+          if (newEstimateMs) {
+            task.estimateMs = newEstimateMs;
+            delete task.estimateSkipped;
+          } else {
+            delete task.estimateMs;
           }
           this.store.save();
+
+          const isDone = details.querySelector('[data-action="toggle-draft"]').classList.contains("is-done");
+          if (isDone && !task.done) {
+            this.closeTaskModal();
+            this.completeTask(task);         // same flow as clicking the checkmark
+            return;
+          }
+          if (!isDone && task.done) {
+            task.done = false;
+            task.completedAt = undefined;
+            this.store.save();
+          }
         }
         
         this.closeTaskModal(); 
@@ -1638,7 +2280,302 @@ class FocusApp {
     this.render();
   }
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
   startTask(id) {
+    this.closeFocusTasks();   // the popout would otherwise sit on top of the start countdown
+    const task = this.store.findTask(id);
+    if (!task) return;
+    if (this.store.state.active === id) return;
+    if (this.countdown?.taskId === id) return;   // already counting down for this one
+    this.dismissCelebration();
+    // First start of a task: ask how long it will take (skipped once answered, or when set in the details).
+    if (!Number.isFinite(task.estimateMs) && !task.estimateSkipped) {
+      this.openEtaPrompt(id);
+      return;
+    }
+    this.beginCountdown(id);
+  }
+
+  /* --- Estimate prompt (an overlay in the clock panel, so it also works inside PiP) ------------ */
+
+  openEtaPrompt(id) {
+    const task = this.store.findTask(id);
+    if (!task) return;
+    this.etaPrompt = { taskId: id };
+    this.elements.etaTaskName.textContent = task.name;
+    this.elements.etaMinutes.value = "";
+    this.elements.etaDisplay.hidden = false;
+    this.elements.centerStage.dataset.etaState = "active";
+  }
+
+  closeEtaPrompt() {
+    this.etaPrompt = null;
+    this.elements.etaDisplay.hidden = true;
+    this.elements.centerStage.dataset.etaState = "";
+  }
+
+  // minutes = null means "no estimate": the task starts, and we don't ask again.
+  chooseEta(minutes) {
+    const task = this.etaPrompt ? this.store.findTask(this.etaPrompt.taskId) : null;
+    this.closeEtaPrompt();
+    if (!task) return;
+    if (minutes) {
+      task.estimateMs = minutes * 60 * 1000;
+      delete task.estimateSkipped;
+    } else {
+      task.estimateSkipped = true;
+    }
+    this.store.save();
+    this.beginCountdown(task.id);
+  }
+
+  /* --- ETA: when will this task be done, breaks included ---------------------------------------- */
+
+  // Wall-clock time the task should be finished, simulating the pomodoro cycle: every focus
+  // phase that fills up is followed by a break before the remaining focus time continues.
+  etaFinishAt(task, now = Date.now()) {
+    const estimate = task.estimateMs;
+    if (!Number.isFinite(estimate) || estimate <= 0) return null;
+    let remaining = estimate - this.taskDuration(task, now);
+    if (remaining <= 0) return null;
+    const focusMs = this.focusDurationMs();
+    const breakMs = this.breakDurationMs();
+    let time = now;
+    let workLeft = focusMs;
+    const pomodoro = this.store.state.pomodoro;
+    if (pomodoro && this.store.state.active === task.id) {
+      const left = pomodoro.paused && Number.isFinite(pomodoro.remainingMs)
+        ? pomodoro.remainingMs
+        : Math.max(0, pomodoro.phaseEndsAt - now);
+      if (pomodoro.phase === "break") time += left;          // wait out the current break first
+      else if (left > 0) workLeft = left;
+    }
+    for (let guard = 0; remaining > workLeft && guard < 1000; guard += 1) {
+      remaining -= workLeft;
+      time += workLeft + breakMs;
+      workLeft = focusMs;
+    }
+    return time + remaining;
+  }
+
+  etaText(task, now = Date.now()) {
+    if (!Number.isFinite(task.estimateMs) || task.estimateMs <= 0 || task.done) return "";
+    if (this.store.state.active !== task.id) return `Est ${this.shortDuration(task.estimateMs)}`;
+    const finishAt = this.etaFinishAt(task, now);
+    return finishAt ? `ETA ${this.formatTime(finishAt)}` : "Over estimate";
+  }
+
+  etaMarkup(task) {
+    const text = this.etaText(task);
+    return text ? `<div class="eta" title="Estimated time: ${this.escape(this.shortDuration(task.estimateMs))}">${this.escape(text)}</div>` : "";
+  }
+
+  shortDuration(milliseconds) {
+    const totalMinutes = Math.round(Math.max(0, milliseconds) / 60000);
+    if (totalMinutes < 1) return `${Math.round(Math.max(0, milliseconds) / 1000)}s`;
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    if (!hours) return `${minutes}m`;
+    return minutes ? `${hours}h ${String(minutes).padStart(2, "0")}m` : `${hours}h`;
+  }
+
+  /* --- Completing a task: raindrops, streak and the celebration --------------------------------- */
+
+  raindropsFor(focusedMs, estimateMs) {
+    const rules = FocusApp.RAINDROPS;
+    const ratio = focusedMs / estimateMs;
+    if (ratio < rules.onTargetBand[0]) return { tier: "faster", amount: rules.faster };
+    if (ratio <= rules.onTargetBand[1]) return { tier: "on-target", amount: rules.base };
+    return { tier: "slower", amount: rules.slower };
+  }
+
+  // Consecutive days with at least one completed task.
+  bumpStreak() {
+    const streak = this.store.state.streak;
+    const today = this.today();
+    if (streak.lastDate !== today) {
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      streak.count = streak.lastDate === this.dateKey(yesterday) ? streak.count + 1 : 1;
+      streak.lastDate = today;
+    }
+    return streak.count;
+  }
+
+  currentStreak() {
+    const { count, lastDate } = this.store.state.streak;
+    if (!lastDate) return 0;
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    return lastDate === this.today() || lastDate === this.dateKey(yesterday) ? count : 0;
+  }
+
+  completeTask(task) {
+    if (this.store.state.active === task.id) this.stopTask(false);   // a finished task stops its timer
+    task.done = true;
+    task.completedAt = new Date().toISOString();
+    const focusedMs = this.taskDuration(task);
+    const estimateMs = Number.isFinite(task.estimateMs) && task.estimateMs > 0 ? task.estimateMs : null;
+    const streak = this.bumpStreak();
+
+    let reward = null;
+    let note = "";
+    if (task.raindropsEarned) note = "Raindrops already earned for this task";
+    else if (!estimateMs) note = "Set an estimate to earn raindrops";
+    else if (focusedMs < FocusApp.RAINDROPS.minFocusMs) note = "Focus a little longer to earn raindrops";
+    else {
+      reward = this.raindropsFor(focusedMs, estimateMs);
+      task.raindropsEarned = reward.amount;
+      this.store.state.raindrops = (this.store.state.raindrops || 0) + reward.amount;
+    }
+    this.store.save();
+    this.render();
+    this.showCelebration({ focusedMs, estimateMs, reward, note, streak });
+  }
+
+  showCelebration({ focusedMs, estimateMs, reward, note, streak }) {
+    const phrases = {
+      faster: ["Bravo!", "Brilliant!", "Crushed it!"],
+      "on-target": ["Well done!", "Right on time!", "Spot on!"],
+      slower: ["Task done!", "Nice work!", "Finished!"],
+      none: ["Well done!", "Nice work!", "Task done!"]
+    }[reward?.tier || (estimateMs && focusedMs >= estimateMs * FocusApp.RAINDROPS.onTargetBand[1] ? "slower" : "none")];
+    let compare = focusedMs ? `Focused for ${this.shortDuration(focusedMs)}` : "";
+    if (estimateMs && focusedMs) {
+      const difference = focusedMs - estimateMs;
+      const verdict = Math.abs(difference) < 60000
+        ? "right on your estimate"
+        : difference < 0 ? `${this.shortDuration(-difference)} faster` : `${this.shortDuration(difference)} over`;
+      compare = `Estimated ${this.shortDuration(estimateMs)} · Took ${this.shortDuration(focusedMs)} · ${verdict}`;
+    }
+    const title = this.elements.celebrateTitle;
+    title.textContent = phrases[Math.floor(Math.random() * phrases.length)];
+    title.classList.remove("countdown-pop");
+    void title.offsetWidth;
+    title.classList.add("countdown-pop");
+    this.elements.celebrateCompare.textContent = compare;
+    this.elements.celebrateDrops.textContent = reward ? `+${reward.amount} raindrops` : note;
+    this.elements.celebrateDrops.classList.toggle("is-note", !reward);
+    this.elements.celebrateStreak.textContent = streak > 1 ? `${streak}-day streak` : "Streak started";
+    this.elements.celebrateDisplay.hidden = false;
+    this.elements.centerStage.dataset.celebrateState = "active";
+    this.playCountdownTick(true);
+    window.clearTimeout(this.celebrationTimer);
+    this.celebrationTimer = window.setTimeout(() => this.dismissCelebration(), FocusApp.CELEBRATION_MS);
+  }
+
+  dismissCelebration() {
+    window.clearTimeout(this.celebrationTimer);
+    this.celebrationTimer = null;
+    this.elements.celebrateDisplay.hidden = true;
+    this.elements.centerStage.dataset.celebrateState = "";
+  }
+
+  renderStats() {
+    this.elements.raindropCount.textContent = String(this.store.state.raindrops || 0);
+    const streak = this.currentStreak();
+    this.elements.streakCount.textContent = String(streak);
+    this.elements.streakChip.classList.toggle("is-idle", streak === 0);
+  }
+
+  /* --- New: countdown helpers ----------------------------------------- */
+
+  beginCountdown(taskId) {
+    if (this.countdown) this.clearCountdown();
+    const now = Date.now();
+    this.countdown = {
+      taskId,
+      step: 0,
+      stepEndsAt: now + 1000,
+      endsAt: now + 3500            // 3 · 2 · 1 · GO!
+    };
+    this.elements.centerStage.dataset.countdownState = "active";
+    this.renderCountdown();
+    this.playCountdownTick(false);
+    this.countdownInterval = window.setInterval(() => this.tickCountdown(), 80);
+  }
+
+  tickCountdown() {
+    if (!this.countdown) return;
+    const now = Date.now();
+    const elapsed = 3500 - (this.countdown.endsAt - now);
+    const step = elapsed < 1000 ? 0 : elapsed < 2000 ? 1 : elapsed < 3000 ? 2 : 3;
+    if (step !== this.countdown.step) {
+      this.countdown.step = step;
+      this.renderCountdown();
+      this.playCountdownTick(step === 3);
+    }
+    if (now >= this.countdown.endsAt) {
+      const taskId = this.countdown.taskId;
+      this.clearCountdown();
+      this.startTaskNow(taskId);
+    }
+  }
+
+  renderCountdown() {
+    if (!this.countdown) return;
+    const steps = ["3", "2", "1", "GO!"];
+    const label = steps[Math.min(this.countdown.step, steps.length - 1)];
+    const valueEl = this.elements.countdownValue;
+    this.elements.countdownDisplay.hidden = false;
+    if (valueEl.textContent !== label) {
+      valueEl.textContent = label;
+      valueEl.classList.toggle("is-go", label === "GO!");
+      valueEl.classList.remove("countdown-pop");
+      void valueEl.offsetWidth;                 // force reflow so the animation restarts
+      valueEl.classList.add("countdown-pop");
+    }
+  }
+
+  clearCountdown() {
+    if (this.countdownInterval) {
+      window.clearInterval(this.countdownInterval);
+      this.countdownInterval = null;
+    }
+    this.countdown = null;
+    this.elements.countdownDisplay.hidden = true;
+    this.elements.centerStage.dataset.countdownState = "";
+    const valueEl = this.elements.countdownValue;
+    valueEl.textContent = "";
+    valueEl.classList.remove("is-go", "countdown-pop");
+  }
+
+  playCountdownTick(isGo = false) {
+    const context = this.audioContext || this.unlockAudio();
+    if (!context) return;
+    const play = () => {
+      const start = context.currentTime;
+      const osc = context.createOscillator();
+      const gain = context.createGain();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(isGo ? 880 : 620, start);
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(0.06, start + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.14);
+      osc.connect(gain);
+      gain.connect(context.destination);
+      osc.start(start);
+      osc.stop(start + 0.16);
+    };
+    if (context.state === "running") play();
+    else context.resume().then(play).catch(() => {});
+  }
+
+  /* --- The original startTask logic, now called after GO! -------------- */
+  startTaskNow(id) {
     const now = Date.now();
     this.advancePomodoro(now);
     if (this.store.state.active === id) return;
@@ -1667,8 +2604,18 @@ class FocusApp {
     this.store.state.active = id;
     this.store.save();
     if (startsPomodoro) this.playPhaseSound("work");
+    this.totalActiveFocusMs = 0;
+    this.lastActiveTick = Date.now();
     this.render();
   }
+
+
+
+
+
+
+
+
 
   advancePomodoro(now) {
     const pomodoro = this.store.state.pomodoro;
@@ -1783,16 +2730,51 @@ class FocusApp {
     this.store.state.active = null;
     if (pauseCycle) this.pausePomodoro(now);
     else this.store.save();
+    this.checkInActive = false;
+    this.totalActiveFocusMs = 0;
+    this.lastActiveTick = null;
+    this.elements.checkinDisplay.hidden = true;
+    this.elements.centerStage.dataset.checkinState = "";
     if (redraw) this.render();
+  }
+
+  openCheckIn() {
+    this.checkInActive = true;
+    this.checkInDeadline = Date.now() + 30000; // 30 seconds
+    this.elements.checkinDisplay.hidden = false;
+    this.elements.centerStage.dataset.checkinState = "active";
+    this.elements.checkinCountdown.textContent = "30";
+    this.playPhaseSound("break"); // Plays an alert sound
+  }
+
+  confirmCheckIn() {
+    this.checkInActive = false;
+    this.elements.checkinDisplay.hidden = true;
+    this.elements.centerStage.dataset.checkinState = "";
+    
+    // Reset the timer so it asks again after another 1 hour of focus
+    this.totalActiveFocusMs = 0;
+    this.lastActiveTick = Date.now(); 
+  }
+
+  checkInTimeout() {
+    this.checkInActive = false;
+    this.elements.checkinDisplay.hidden = true;
+    this.elements.centerStage.dataset.checkinState = "";
+    this.stopTask(); // Automatically stops and pauses the task
   }
 
   toggleDone(id) {
     const task = this.store.findTask(id);
     if (!task) return;
-    task.done = !task.done;
-    task.completedAt = task.done ? new Date().toISOString() : undefined;
-    this.store.save();
-    this.render();
+    if (task.done) {
+      task.done = false;
+      task.completedAt = undefined;
+      this.store.save();
+      this.render();
+    } else {
+      this.completeTask(task);
+    }
   }
 
   today() {
@@ -1869,66 +2851,112 @@ class FocusApp {
     }[character]));
   }
 
+  // Spreads the date's letters so it is exactly as wide as the clock (or shrinks it if it is wider).
+  // Everything is in em, so the result is the same at every stage size and only needs
+  // recomputing when the text changes or fonts finish loading (or the panel moves window).
+  closeFocusTasks() {
+    this.elements.focusTasksDropdown.classList.remove("is-open");
+    this.elements.focusTasksToggle.setAttribute("aria-expanded", "false");
+  }
+
+  setPipButtonState(isOpen) {
+    const button = this.elements.pomodoroPipButton;
+    button.setAttribute("aria-pressed", String(isOpen));
+    button.setAttribute("aria-label", isOpen ? "Exit picture in picture" : "Enter picture in picture");
+  }
+
   async toggleDocumentPiP() {
     if (!window.documentPictureInPicture) {
       alert("Document Picture-in-Picture is not supported in your browser.");
       return;
     }
 
-    const clockPanel = this.elements.clockPanel;
+    const centerStage = this.elements.centerStage;
 
     if (window.documentPictureInPicture.window) {
       window.documentPictureInPicture.window.close();
       return;
     }
 
-    const pipWindow = await window.documentPictureInPicture.requestWindow({
-      width: 360,
-      height: 360
-    });
+    try {
+      // Wider than tall, like the stage itself (--stage-ratio in page-focus.css).
+      // The window is free-form: the stage keeps its ratio and letterboxes inside it,
+      // so we never fight the user's resizing.
+      const pipWindow = await window.documentPictureInPicture.requestWindow({
+        width: 480,
+        height: 270
+      });
+      const pipDocument = pipWindow.document;
 
-    // Copy all stylesheets over
-    [...document.styleSheets].forEach(styleSheet => {
-      try {
-        const cssRules = [...styleSheet.cssRules].map(rule => rule.cssText).join('');
-        const style = pipWindow.document.createElement('style');
-        style.textContent = cssRules;
-        pipWindow.document.head.appendChild(style);
-      } catch {
-        const link = pipWindow.document.createElement('link');
-        link.rel = 'stylesheet';
-        link.href = styleSheet.href;
-        pipWindow.document.head.appendChild(link);
+      // 1. Copy stylesheets. All PiP layout lives in page-focus.css (body.is-pip).
+      document.querySelectorAll('link[rel="stylesheet"]').forEach(link => {
+        const newLink = pipDocument.createElement('link');
+        newLink.rel = 'stylesheet';
+        newLink.href = new URL(link.href, window.location.href).href;
+        pipDocument.head.appendChild(newLink);
+      });
+
+      document.querySelectorAll('style:not(#clockFontFaces)').forEach(style => {
+        const newStyle = pipDocument.createElement('style');
+        newStyle.textContent = style.textContent;
+        pipDocument.head.appendChild(newStyle);
+      });
+
+      // 2. Background image (chosen at runtime, so it can't come from the stylesheet)
+      const bgImage = getComputedStyle(document.body).backgroundImage;
+      let safeBg = bgImage;
+      if (bgImage && bgImage !== 'none') {
+        const match = bgImage.match(/url\(["']?(.*?)["']?\)/);
+        if (match && match[1]) {
+          safeBg = `url("${new URL(match[1], window.location.href).href}")`;
+        }
+      } else {
+        safeBg = `url("${new URL("images/bg.jpg", window.location.href).href}")`;
       }
-    });
 
-    const currentBgImage = document.body.style.backgroundImage || `url("images/bg.jpg")`;
+      pipDocument.body.style.cssText = `
+        background-image: ${safeBg};
+        background-position: center;
+        background-size: cover;
+        background-repeat: no-repeat;
+        background-attachment: fixed;
+      `;
 
-    pipWindow.document.body.style.cssText = `
-      margin: 0; 
-      display: flex; 
-      align-items: center; 
-      justify-content: center; 
-      background-image: ${currentBgImage}; 
-      background-position: center; 
-      background-size: cover; 
-      background-repeat: no-repeat; 
-      background-attachment: fixed;
-      height: 100vh; 
-      overflow: hidden;
-    `;
+      this.installFontStyles();
+      pipDocument.body.classList.add("is-pip");
+      pipDocument.body.appendChild(centerStage);
+      this.setPipButtonState(true);
 
-    pipWindow.document.body.classList.add("is-pip");
-    pipWindow.document.body.appendChild(clockPanel);
+      // 3. The page's own click/Escape listeners don't see this window, so the tasks
+      //    popout needs its own: Escape or a click outside it closes it.
+      const dismissTasks = event => {
+        const dropdown = this.elements.focusTasksDropdown;
+        if (!dropdown.classList.contains("is-open")) return;
+        const dismiss = event.type === "keydown"
+          ? event.key === "Escape"
+          : !dropdown.contains(event.target);
+        if (dismiss) this.closeFocusTasks();
+      };
+      pipDocument.addEventListener("click", dismissTasks);
+      pipDocument.addEventListener("keydown", dismissTasks);
 
-    pipWindow.addEventListener("unload", () => {
-      const focusPage = document.querySelector('.focus-page');
-      if (focusPage && clockPanel) {
-        focusPage.prepend(clockPanel);
+      // 4. When PiP closes, move the clock panel back exactly where it was.
+      //    "pagehide" is the reliable close signal ("unload" is being phased out).
+      pipWindow.addEventListener("pagehide", () => {
+        const focusPage = document.querySelector('.focus-page');
+        if (focusPage && centerStage) {
+          focusPage.insertBefore(centerStage, focusPage.firstElementChild);
+        }
+        this.closeFocusTasks();
+        this.setPipButtonState(false);
         this.render();
-      }
-    }, { once: true });
+      }, { once: true });
+
+    } catch (err) {
+      console.error("Failed to open PiP:", err);
+    }
   }
 }
 
 new FocusApp(document);
+new CloudSync(document);

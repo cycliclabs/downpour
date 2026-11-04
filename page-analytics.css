@@ -24,6 +24,36 @@
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 #focusActivity {
     display: flex;
     flex-direction: column;
@@ -118,21 +148,13 @@
     mix-blend-mode: normal;
 }
 
-.activity-cell[data-level="1"] {
-    background-color: #146e41
-}
-
-.activity-cell[data-level="2"] {
-    background-color: #0c924b
-}
-
-.activity-cell[data-level="3"] {
-    background-color: #1ecb43
-}
-
-.activity-cell[data-level="4"] {
-    background-color: #00ff2a
-}
+/* Level colours come from app.js (activityRamp) as --level-1..5 on #focusActivity,
+   so the grid and the legend always share one ramp per category. */
+.activity-cell[data-level="1"] { background-color: var(--level-1, #1f5d2a); }
+.activity-cell[data-level="2"] { background-color: var(--level-2, #2a8a3c); }
+.activity-cell[data-level="3"] { background-color: var(--level-3, #39d353); }
+.activity-cell[data-level="4"] { background-color: var(--level-4, #73e688); }
+.activity-cell[data-level="5"] { background-color: var(--level-5, #b4f5c0); }
 
 button.activity-cell {
     cursor: pointer
@@ -159,18 +181,43 @@ button.activity-cell[aria-pressed="true"] {
 .activity-legend {
     display: flex;
     align-items: center;
-    justify-content: flex-end;
     gap: 3px;
     margin-top: auto;
-    padding-top: 14px;
+    align-self: flex-end;      /* size to content, align right */
+    padding: 8px 12px;         /* symmetric padding now that it's content-sized */
     color: var(--muted);
-    font-size: 11px
+    font-size: 11px;
+    background: black;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: var(--radius);
+    box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.2);
 }
 
 .activity-legend .activity-cell {
     flex: none;
     width: var(--activity-cell-size)
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -257,6 +304,24 @@ button.activity-cell[aria-pressed="true"] {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 #timeLine {
     display: block;
     padding: 14px 10px;
@@ -305,21 +370,64 @@ button.activity-cell[aria-pressed="true"] {
 
 .timeline-event {
     position: absolute;
-    left: 40px;
-    right: 0;
+    /* lanes: blocks that overlap in time share the width side by side */
+    left: calc(40px + (100% - 40px) * var(--lane, 0) / var(--lanes, 1));
+    width: calc((100% - 40px) / var(--lanes, 1) - 2px);
     top: var(--event-top);
     height: var(--event-height);
     min-height: 17px;
     z-index: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    gap: 1px;
     overflow: hidden;
-    border-radius: var(--radius);
-    padding: 2px 4px;
-    background: color-mix(in srgb, var(--event-color) 24%, var(--card));
+    padding: 2px 6px;
+    border-left: 3px solid var(--event-color);
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--event-color) 28%, rgba(20, 20, 20, .85));
     color: var(--text);
-    font-size: 10px;
-    line-height: 1.2;
+    font-size: 11px;
+    line-height: 1.25;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    cursor: default;
+    transition: filter .15s ease, box-shadow .15s ease
+}
+
+.timeline-event:hover {
+    z-index: 4;
+    filter: brightness(1.2);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, .45)
+}
+
+.timeline-event.is-short {
+    justify-content: center;
+    padding-top: 0;
+    padding-bottom: 0;
+    line-height: 1
+}
+
+.timeline-event.is-live {
+    box-shadow: 0 0 0 1px var(--event-color), 0 0 10px color-mix(in srgb, var(--event-color) 55%, transparent)
+}
+
+.timeline-event-name {
+    overflow: hidden;
+    font-weight: 600;
     white-space: nowrap;
     text-overflow: ellipsis
+}
+
+.timeline-event-time {
+    color: var(--muted);
+    font-size: 10px;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums
+}
+
+.timeline-date[title]:not([title=""]) {
+    cursor: pointer
 }
 
 .timeline-empty {
@@ -399,6 +507,24 @@ button.activity-cell[aria-pressed="true"] {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 #focusSummary {
     padding: 20px;
     max-width: 400px;
@@ -431,19 +557,88 @@ button.activity-cell[aria-pressed="true"] {
     font-variant-numeric: tabular-nums
 }
 
+.focus-goal-wrap {
+    position: relative;
+    margin-bottom: 14px
+}
+
 .focus-goal-track {
     height: 14px;
     background: #eef0f2;
     border-radius: var(--radius);
     overflow: hidden;
-    margin-bottom: 22px
+    margin-bottom: 22px;
+    
+    display: flex;       /* Forces items side-by-side, ignoring HTML spaces */
+}
+
+.focus-goal-segment {
+    height: 100%;
+    flex: none;
+    box-shadow: inset -2px 0 0 rgba(255, 255, 255, .85); /* thin divider between categories */
+    transition: width .3s ease, filter .15s ease
+}
+
+.focus-goal-segment:hover {
+    filter: brightness(1.15)
+}
+
+.focus-goal-tip {
+    position: absolute;
+    bottom: calc(100% + 8px);
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 9px;
+    border-radius: var(--radius-sm);
+    background: rgba(20, 20, 20, .92);
+    border: 1px solid var(--glass-border);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, .4);
+    font-size: 12px;
+    white-space: nowrap;
+    pointer-events: none;
+    z-index: 5
+}
+
+.focus-goal-tip[hidden] {
+    display: none
+}
+
+.focus-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 14px;
+    margin-bottom: 22px;
+    color: var(--muted);
+    font-size: 11px
+}
+
+.focus-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px
+}
+
+.focus-legend .dot {
+    flex: none
 }
 
 .focus-goal-bar {
     height: 100%;
-    min-width: 0;
-    border-radius: inherit;
-    transition: width .3s ease
+    border-radius: 0 !important; 
+    border: none !important;
+    box-shadow: none !important;
+    
+    /* THE FIX: Pull every bar 2px to the right so they physically overlap */
+    margin-right: -2px; 
+    
+    /* Ensure they don't try to shrink */
+    flex-shrink: 0; 
+}
+
+.focus-goal-bar:first-child {
+    margin-left: 0;
 }
 
 .focus-goal-empty {
@@ -452,42 +647,86 @@ button.activity-cell[aria-pressed="true"] {
     margin: 0 0 22px
 }
 
-.focus-breakdown {
-    display: flex;
-    flex-direction: column;
-    gap: 16px
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+.trend-multi-select {
+    position: relative;
 }
 
-.focus-row-head {
-    display: flex;
-    justify-content: space-between;
-    gap: 8px;
+.trend-multi-btn {
+    gap: 6px;
     font-size: 12px;
-    margin-bottom: 6px
 }
 
-.focus-row-head>span:first-child {
+.trend-multi-count {
+    opacity: 0.7;
+}
+
+.trend-multi-content {
+    display: none;
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    min-width: 180px;
+    max-height: 240px;
+    overflow-y: auto;
+    background: var(--glass-pane);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    padding: 8px;
+    z-index: 10;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.trend-multi-select.is-open .trend-multi-content {
+    display: flex;
+}
+
+.trend-multi-content label {
     display: flex;
     align-items: center;
-    gap: 7px;
-    min-width: 0
+    gap: 8px;
+    padding: 4px 6px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--text);
+    transition: background 0.15s;
 }
 
-.focus-row-head>span:last-child {
-    color: var(--muted);
-    font-variant-numeric: tabular-nums;
-    white-space: nowrap
+.trend-multi-content label:hover {
+    background: rgba(255, 255, 255, 0.1);
 }
 
-.focus-track {
-    height: 6px;
-    background: #eef0f2;
-    border-radius: var(--radius);
-    overflow: hidden
+.trend-multi-content input[type="checkbox"] {
+    margin: 0;
+    accent-color: var(--text);
 }
 
-.focus-bar {
-    height: 100%;
-    border-radius: inherit;
-    min-width: 0
+.trend-multi-content label.disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
 }

@@ -1,0 +1,38 @@
+/* Clock fonts. The files live in ./fonts (names below must match exactly). The list of choices is
+   FocusApp.CLOCK_FONTS in app.js; its `family` values must match the family names here.
+   Variable fonts declare their weight range so any clock weight can be used. */
+
+@font-face {
+    font-family: "Jost";
+    src: local("Jost"), url("fonts/Jost-VariableFont_wght.ttf") format("truetype");
+    font-weight: 100 900;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "Audiowide";
+    src: local("Audiowide"), url("fonts/Audiowide-Regular.ttf") format("truetype");
+    font-weight: 400;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "Cinzel";
+    src: local("Cinzel"), url("fonts/Cinzel-VariableFont_wght.ttf") format("truetype");
+    font-weight: 400 900;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "National Park";
+    src: local("National Park"), url("fonts/NationalPark-VariableFont_wght.ttf") format("truetype");
+    font-weight: 200 800;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: "Unkempt";
+    src: local("Unkempt"), url("fonts/Unkempt-Bold.ttf") format("truetype");
+    font-weight: 700;
+    font-display: swap;
+}

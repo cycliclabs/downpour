@@ -1,64 +1,113 @@
 /* ==========================================================================
-   Clock panel
+   Center stage
    --------------------------------------------------------------------------
-   The panel is a square "stage" and a size container. Everything inside is
-   sized in cqw (1% of the panel's width), so all elements keep exactly the
-   same relative size and position no matter how big the panel is.
-   Only the panel itself changes size (see --clock-panel-max and the width
-   rule below). Never use px / vw / vh for anything inside the stage.
+   .center-stage is a size container holding three vertical siblings, spaced
+   evenly: .pomodoro-controls, .clock, and the bar (.focus-now-widget or
+   .focus-idle-widget). Overlays (countdown, estimate, celebration, check-in)
+   are absolutely positioned over it.
+   Everything inside is sized in stage units: --u (1cqw on the page), and every
+   direct child has 1em = 1 unit, so the layout is identical at every size.
+     - page: a fixed ratio (--stage-ratio), capped by --stage-max
+     - PiP: the stage fills the window and --u grows to the largest value that fits
+   Never use px / vw / vh for anything placed inside the stage. The one
+   exception is the tasks list in .focus-tasks-content: a px UI that scrolls.
    ========================================================================== */
 
-.clock-panel {
-    /* The largest the panel may get. Shrinks further if the parent is narrower. */
-    --clock-panel-max: min(560px, 56vh);
+.center-stage {
+    /* ---- Stage knobs ---- */
+    --stage-ratio: 2;               /* page: width / height. Tight around the content */
+    --stage-pad: 0.1;                 /* PiP: empty space on every side of the column, in stage units */
+    --content-h: 48;                /* stage units the column needs (label + clock + bar + small gaps); PiP sizes from it */
+    --stage-max: 600px;             /* cap on the page; PiP lifts it */
+    --stage-reserved: 200px;        /* vertical space the page keeps for its bars; PiP sets 0 */
+    --u: 1cqw;                      /* the stage unit: every child has 1em = 1 unit */
+    --bar-h: calc(7.5 * var(--u));
+    --bar-font: calc(3 * var(--u)); /* everything inside the bar is em of this */
+
     position: relative;
     flex: none;
-    width: min(100%, var(--clock-panel-max));
-    aspect-ratio: 1;
-    margin: clamp(12px, 3vh, 40px) auto;
-    padding: 0;
-    container-type: inline-size;
-    text-align: center;
-}
-
-/* In the picture-in-picture window the panel fills the largest square that fits. */
-body.is-pip .clock-panel {
-    --clock-panel-max: 100vmin;
+    width: min(calc(100% - 64px), var(--stage-max), calc((100vh - var(--stage-reserved)) * var(--stage-ratio)));
+    aspect-ratio: var(--stage-ratio);
     margin: 0;
-}
-
-/* Every direct child of the stage defines 1 unit = 1% of the stage width. */
-.clock-panel > * {
-    font-size: 1cqw;
-}
-
-.clock-display {
-    position: absolute;
-    inset: 0;
+    padding: 0;
+    container-type: size;
+    /* controls, clock and bar are siblings, spaced evenly top to bottom */
     display: flex;
     flex-direction: column;
     align-items: center;
-    justify-content: center;
+    justify-content: space-evenly;
     text-align: center;
 }
 
-.clock {
-    font-size: 24em;
-    font-family: Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif;
-    font-weight: 700;
-    line-height: 1;
-    letter-spacing: .04em;
-    font-variant-numeric: tabular-nums;
-    text-shadow: 
-        0 0.04em 0.08em rgba(0, 0, 0, 0.9), 
-        0 0.1em 0.2em rgba(0, 0, 0, 0.6);
+/* The page centres the stage in the screen (not just in the space under the top bar). The section
+   covers the viewport; only the stage and the fixed bars take clicks. */
+.focus-page:not([hidden]) {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
 }
 
-.clock-date {
-    margin-top: .3em;
-    font-size: 5em;
-    line-height: 1.2;
-    white-space: nowrap;
+.center-stage {
+    pointer-events: auto;
+    translate: 0 -5.5vh;
+}
+
+/* PiP: the very same stage, moved into the PiP window. It fills the whole window (no ratio,
+   no letterbox) and the unit is the largest one at which the content still fits, so the
+   content is as big as the window allows and the leftover space is shared out evenly. */
+body.is-pip {
+    display: flex;
+    min-height: 100vh;
+    margin: 0;
+    padding: 0;
+}
+
+html:has(body.is-pip) {
+    overflow: hidden;
+}
+
+body.is-pip .center-stage {
+    --stage-max: none;
+    /* the largest unit at which the column (70 wide + --stage-pad each side) fits the width and --content-h fits the height */
+    --u: min(calc(100cqw / (70 + 2 * var(--stage-pad))), calc(100cqh / (var(--content-h) + 2 * var(--stage-pad))));
+    width: 100%;
+    aspect-ratio: auto;
+    margin: 0;
+    height: calc(100vh - 20px);   /* title bar height; adjust until top and bottom look equal */
+    margin-top: 20px;
+}
+
+/* Minimum breathing room between the three siblings; space-evenly adds the rest. */
+.center-stage > :is(.pomodoro-controls, .clock, .focus-now-widget, .focus-idle-widget) {
+    margin-block: calc(1.5 * var(--u));
+}
+
+/* Every direct child of the stage defines 1 unit = 1% of the stage width. */
+.center-stage > * {
+    font-size: var(--u);
+}
+
+.is-hidden {
+    visibility: hidden;
+}
+
+.clock {
+    /* --clock-scale is set by fitClock() in app.js so the digits are exactly as wide as the bar */
+    font-size: calc(var(--clock-scale, 20) * var(--u));
+    /* --clock-font / --clock-weight are set on the panel by app.js (settings > Clock font) */
+    font-family: var(--clock-font, "Jost"), Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif;
+    font-weight: var(--clock-weight, 600);
+    line-height: 1;
+    text-box: trim-both cap alphabetic;   /* box = digit height, so spacing doesn't depend on the font */
+    letter-spacing: .04em;
+    padding-left: .04em;          /* balances the trailing letter-space so the digits sit centred */
+    font-variant-numeric: tabular-nums;
+    text-shadow:
+        0 0.04em 0.08em rgba(0, 0, 0, 0.9),
+        0 0.1em 0.2em rgba(0, 0, 0, 0.6);
 }
 
 .lower-bar-left,
@@ -68,64 +117,119 @@ body.is-pip .clock-panel {
     align-items: center
 }
 
-.focus-now-widget {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: min(480px, calc(100% - 160px));
-    height: 40px;
-    transform: translate(-50%, -50%);
+/* --------------------------------------------------------------------------
+   The bar slot. "Now focusing" and "Today's tasks" are two faces of one bar:
+   same position, size, radius, shadow and text scale. Only one is visible.
+   -------------------------------------------------------------------------- */
+.focus-now-widget,
+.focus-idle-widget {
+    position: relative;
+    flex: none;
+    width: 70em;
+    height: var(--bar-h);
+    z-index: 3;
     color: var(--text);
     pointer-events: auto;
 }
 
-.focus-now-caption {
-    position: absolute;
-    top: -18px;
-    left: 50%;
-    transform: translateX(-50%);
-    color: var(--muted);
-    font-size: 11px;
-    white-space: nowrap;
+.focus-now-widget[hidden],
+.focus-idle-widget[hidden] {
+    display: none;
 }
 
-.focus-now-task {
-    width: 100%;
-    height: 100%;
-}
-
+.focus-now-task,
+.focus-tasks-dropdown,
 .focus-now-task .task-row {
     width: 100%;
+    max-width: 100%;
     height: 100%;
-    flex: 1;
 }
 
-.focus-now-task .task {
+:is(.focus-now-task .task, .focus-tasks-content .task, .focus-tasks-header) {
+    --ring: .14em;                  /* priority-dot ring; read by page-tasksandsomefocus.css */
     width: 100%;
     height: 100%;
-    padding: 0 16px;
-    border-radius: var(--radius);
+    min-height: 0;
+    margin: 0;
+    padding: 0 1em;
+    gap: .8em;
+    font-size: var(--bar-font);
+    border-radius: .65em;
+    box-shadow: 0 .25em .8em rgba(0, 0, 0, 0.2);
+    /* .task animates "all" by default; sizes must follow the stage instantly, otherwise
+       the bar lags behind while the window is being resized. */
+    transition-property: background-color, border-color, box-shadow, opacity;
 }
 
-.focus-now-task .task-main {
-    align-items: center
+/* --- Task rows in the bar and in the popout list (em of the bar font) --------- */
+:is(.focus-now-task, .focus-tasks-content) .task-main {
+    align-items: center;
+    gap: .6em;
 }
 
-.focus-now-task .task-actions {
+:is(.focus-now-task, .focus-tasks-content) .task-name {
+    gap: .4em;
+}
+
+:is(.focus-now-task, .focus-tasks-content) .task-name,
+:is(.focus-now-task, .focus-tasks-content) .timer {
+    font-size: 1em;               /* same as "Today's tasks": one text size across the stage */
+}
+
+:is(.focus-now-task, .focus-tasks-content) .eta {
+    font-size: .85em;
+}
+
+:is(.focus-now-task, .focus-tasks-content) .category {
+    font-size: .85em;
+    letter-spacing: .05em;
+}
+
+.focus-now-task .category {
+    display: none;                /* the bar is only as wide as the clock */
+}
+
+:is(.focus-now-task, .focus-tasks-content) .check {
+    width: 1.1em;
+    height: 1.1em;
+    border-width: .1em;
+    border-radius: 50%;
+}
+
+:is(.focus-now-task, .focus-tasks-content) .done .check {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+:is(.focus-now-task, .focus-tasks-content) .done .check::after {
+    position: static;
+    font-size: .65em;
+    line-height: 1;
+}
+
+:is(.focus-now-task, .focus-tasks-content) .task-priority-dot {
+    width: .5em;
+    height: .5em;
+}
+
+:is(.focus-now-task, .focus-tasks-content) .task-actions {
     flex: none;
-    gap: 4px
+    gap: .25em;
 }
 
-.focus-now-task .task-actions .ui-button,
-.focus-now-task .task-actions .ui-button.stop {
-    width: 28px;
-    min-width: 28px;
-    height: 28px;
-    min-height: 28px;
-    padding: 0
+:is(.focus-now-task, .focus-tasks-content) .task-actions .ui-button,
+:is(.focus-now-task, .focus-tasks-content) .task-actions .ui-button.stop {
+    font-size: 1em;                /* reset the fixed 19px so the em sizes below mean "bar font" */
+    width: 2.2em;
+    min-width: 2.2em;
+    height: 2.2em;
+    min-height: 2.2em;
+}
+
+:is(.focus-now-task, .focus-tasks-content) .task-actions img {
+    width: 1.1em;
+    height: 1.1em;
 }
 
 .focus-task-area {
@@ -137,127 +241,8 @@ body.is-pip .clock-panel {
 
 /* --- Pomodoro ring + controls (all measured in stage units) --------------- */
 
-.pomodoro-display {
-    position: absolute;
-    inset: 0;
-    z-index: 1;
-    pointer-events: none;
-}
-
-.pomodoro-display[hidden] {
-    display: none
-}
-
-.pomodoro-phase {
-    position: absolute;
-    top: 21%;
-    left: 0;
-    right: 0;
-    transform: none;
-    font-size: 4.6em;
-    line-height: 1.2;
-    text-align: center;
-    white-space: nowrap;
-    color: #fff;
-    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.8);
-}
-
-.pomodoro-gauge {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    margin: 0;
-    pointer-events: none;
-    z-index: -1;
-}
-
-.pomodoro-arc {
-    display: block;
-    width: 100%;
-    height: 100%;
-    overflow: visible;
-    transform: rotate(-90deg);
-    position: relative;
-    z-index: 0;
-}
-
-.pomodoro-arc-track,
-.pomodoro-arc-progress {
-    fill: none;
-    stroke-width: 4;
-    stroke-linecap: round
-}
-
-.pomodoro-arc-track {
-    stroke: rgba(255, 255, 255, 0.45); /* Increased contrast */
-    filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.35));
-}
-
-.pomodoro-arc-progress {
-    stroke: #00ff84;
-    transition: stroke-dashoffset .4s linear;
-    filter: drop-shadow(0 0 3px #28a86b) drop-shadow(0 0 10px rgba(40, 168, 107, 0.6));
-}
-
-.pomodoro-arc-progress[data-phase="break"] {
-    stroke: #db4f50;
-    /* Soft red glow */
-    filter: drop-shadow(0 0 3px #db4f50) drop-shadow(0 0 10px rgba(219, 79, 80, 0.6));
-}
-
-.pomodoro-actions {
-    position: absolute;
-    bottom: 11%;
-    left: 0;
-    right: 0;
-    transform: none;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 1.5em;
-    pointer-events: auto;
-}
-
-.pomodoro-actions .skip-break[hidden] {
-    display: none
-}
-
-.pomodoro-actions .pomodoro-reset {
-    width: 9em;
-    height: 9em;
-    min-width: 0;
-    min-height: 0;
-    border-radius: var(--radius); /* confirm */
-    font-size: 1em;
-}
-
-.pomodoro-actions .pomodoro-reset img {
-    width: 4.4em;
-    height: 4.4em;
-}
-
-.pomodoro-actions .skip-break {
-    margin: 0;
-    max-width: none;
-    min-height: 0;
-    padding: .5em 1em;
-    border-radius: var(--radius); /* confirm */
-    font-size: 3.6em;
-    line-height: 1.2;
-    white-space: nowrap;
-}
-
-.clock-panel[data-pomodoro-state="running"] .clock-date {
-    visibility: hidden
-}
-
-.clock-panel[data-pomodoro-state="paused"] .clock-date {
-    visibility: visible
-}
-
 .live-time,
-.clock-panel:is([data-pomodoro-state="running"], [data-pomodoro-state="paused"]) .live-time {
+.center-stage:is([data-pomodoro-state="running"], [data-pomodoro-state="paused"]) .live-time {
     display: none !important;
 }
 
@@ -272,49 +257,64 @@ body.is-pip .clock-panel {
     pointer-events: none
 }
 
-.pomodoro-arc-progress[data-phase="break"] {
-    stroke: var(--pomodoro-break)
-}
 
-.pomodoro-settings {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-    margin-top: 14px;
-    padding-top: 13px;
-    border-top: 1px solid var(--line)
-}
-
-.pomodoro-settings label {
+/* "Focus" label + reset: a plain sibling of the clock and the bar */
+/* "Focus" / "Break" / "Ready to focus": always present, so idle and running share one layout.
+   The label is centred. */
+.pomodoro-controls {
+    position: relative;
+    flex: none;
     display: flex;
-    flex-direction: column;
-    gap: 5px;
-    color: var(--muted);
-    font-size: 11px
+    align-items: center;
+    justify-content: center;
 }
 
-.pomodoro-settings input {
-    width: 100%;
-    min-width: 0;
-    padding: 8px;
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    background: #fff;
-    color: var(--text);
-    font: inherit
+/* The label is the control: hover swaps "Focus" for "Reset" and "Break" for "Skip"
+   (both do the same thing: restart the cycle). Idle: plain text, not clickable. */
+.pomodoro-phase {
+    display: grid;
+    padding: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    font-size: 5em;
+    font-weight: 700;
+    line-height: 1;
+    text-box: trim-both cap alphabetic;
+    white-space: nowrap;
+    color: #fff;
+    text-shadow: 0 .03em .06em rgba(0, 0, 0, 0.8);
+    cursor: pointer;
 }
 
-.pomodoro-settings button {
-    grid-column: 1/-1;
-    justify-self: end
+.pomodoro-phase:disabled {
+    cursor: default;
 }
 
-.skip-break {
-    margin: 0
+.pomodoro-phase > * {
+    grid-area: 1 / 1;             /* both texts share one cell, so the width never jumps */
+    transition: opacity .15s ease;
 }
 
-.skip-break[hidden] {
-    display: none
+.phase-action {
+    opacity: 0;
+    color: #ff5c5c;
+}
+
+.phase-action::before {
+    content: "Reset";
+}
+
+.pomodoro-phase[data-phase="break"] .phase-action::before {
+    content: "Skip";
+}
+
+.pomodoro-phase:not(:disabled):hover .phase-name {
+    opacity: 0;
+}
+
+.pomodoro-phase:not(:disabled):hover .phase-action {
+    opacity: 1;
 }
 
 #brainDump {
@@ -350,9 +350,9 @@ body.is-pip .clock-panel {
 }
 
 .brain-dump-content {
-    display: none;
+    display: block; /* Changed from none */
     position: absolute;
-    bottom: calc(100% + 12px); /* Floats the panel nicely right above the button */
+    bottom: calc(100% + 12px);
     left: 0;
     width: 360px;
     height: 320px;
@@ -364,10 +364,22 @@ body.is-pip .clock-panel {
     -webkit-backdrop-filter: var(--glass-blur);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08), 0 10px 28px rgba(0, 0, 0, .16);
     z-index: 40;
+    
+    /* Animation Styles */
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transform: translateY(10px) scale(0.96);
+    transform-origin: bottom left;
+    transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s;
 }
 
 .brain-dump.is-open .brain-dump-content {
-    display: block; /* Makes the floating panel appear when open */
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    transform: translateY(0) scale(1);
+    transition: opacity 0.2s ease, transform 0.2s ease, visibility 0s;
 }
 
 .brain-dump #brainDumpToggle {
@@ -414,4 +426,569 @@ body.is-pip .clock-panel {
     font: 14px/1.5 'DM Sans', sans-serif;
     box-sizing: border-box;
     outline: 0;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+.countdown-display {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    pointer-events: none;
+}
+
+.countdown-display[hidden] {
+    display: none;
+}
+
+.countdown-value {
+    font-family: var(--clock-font, "Jost"), Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif;
+    font-weight: var(--clock-weight, 600);
+    font-size: 56em;                    /* 56% of clock panel width */
+    line-height: 1;
+    letter-spacing: .02em;
+    color: #fff;
+    text-shadow:
+        0 .04em .08em rgba(0, 0, 0, .9),
+        0 .1em .2em rgba(0, 0, 0, .6);
+    will-change: transform, opacity;
+}
+
+.countdown-value.is-go {
+    font-family: 'DM Sans', system-ui, -apple-system, sans-serif;
+    font-weight: 800;
+    font-size: 42em; /* Increased from 20em */
+    letter-spacing: -0.04em; /* Tightened slightly for a bigger impact */
+    color: var(--accent);
+    text-shadow:
+        0 0 .3em rgba(0, 255, 132, .55),
+        0 .04em .08em rgba(0, 0, 0, .9);
+}
+
+.countdown-value.countdown-pop {
+    animation: countdown-pop .42s cubic-bezier(.2, .9, .3, 1.4);
+}
+
+@keyframes countdown-pop {
+    0%   { transform: scale(.55); opacity: 0; }
+    55%  { transform: scale(1.08); opacity: 1; }
+    100% { transform: scale(1);    opacity: 1; }
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/* --- Check-in overlay inside clock panel --------------------------------- */
+.checkin-display {
+    position: absolute;
+    inset: 0;
+    z-index: 6;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.8em;
+    text-align: center;
+    pointer-events: auto;
+}
+
+.checkin-display[hidden] {
+    display: none;
+}
+
+.checkin-display h2 {
+    font-size: 6.5em;
+    margin: 0;
+    color: #fff;
+    line-height: 1.1;
+    text-shadow: 0 0.04em 0.08em rgba(0, 0, 0, 0.9);
+}
+
+.checkin-display p {
+    font-size: 3em;
+    margin: 0;
+    color: var(--muted);
+}
+
+#checkinCountdown {
+    font-weight: 700;
+    color: #ff5c5c;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Hide the normal clock UI while one of the overlays is showing */
+.center-stage:is([data-countdown-state="active"], [data-checkin-state="active"], [data-eta-state="active"], [data-celebrate-state="active"]) > :is(.pomodoro-controls, .clock, .focus-now-widget, .focus-idle-widget) {
+    visibility: hidden;
+}
+
+/* --- Estimate prompt + completion celebration (overlays, all in stage units) ---------- */
+.eta-display,
+.celebrate-display {
+    position: absolute;
+    inset: 0;
+    z-index: 6;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1.6em;
+    text-align: center;
+}
+
+.eta-display[hidden],
+.celebrate-display[hidden] {
+    display: none;
+}
+
+.eta-display h2 {
+    max-width: 92%;
+    margin: 0;
+    font-size: 5.2em;
+    line-height: 1.1;
+    color: #fff;
+    text-shadow: 0 .04em .08em rgba(0, 0, 0, .9);
+}
+
+/* task name sits inside the title */
+.eta-task {
+    display: inline-block;
+    max-width: 100%;
+    overflow: hidden;
+    vertical-align: bottom;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    color: var(--accent);
+}
+
+.eta-chips {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: .9em;
+    max-width: 92%;
+}
+
+.eta-form {
+    display: flex;
+    align-items: center;
+    gap: .9em;
+}
+
+.eta-form input {
+    width: 8em;
+    text-align: center;
+}
+
+.eta-links {
+    display: flex;
+    gap: .9em;
+}
+
+.celebrate-display {
+    gap: 1.2em;
+    cursor: pointer;
+}
+
+.celebrate-display h2 {
+    margin: 0;
+    font-family: var(--clock-font, "Jost"), Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif;
+    font-weight: var(--clock-weight, 600);
+    font-size: 11em;
+    line-height: 1;
+    white-space: nowrap;
+    color: #fff;
+    text-shadow: 0 .04em .08em rgba(0, 0, 0, .9), 0 .1em .2em rgba(0, 0, 0, .6);
+}
+
+.celebrate-display p {
+    margin: 0;
+    text-shadow: 0 .05em .15em rgba(0, 0, 0, .8);
+}
+
+.celebrate-compare {
+    max-width: 92%;
+    font-size: 2.8em;
+    color: var(--text);
+}
+
+.celebrate-drops {
+    font-size: 4em;
+    font-weight: 700;
+    color: var(--rain);
+}
+
+.celebrate-drops.is-note {
+    font-size: 2.4em;
+    font-weight: 500;
+    color: var(--muted);
+}
+
+.celebrate-streak {
+    font-size: 2.8em;
+    font-weight: 600;
+    color: var(--warm);
+}
+
+
+
+/* --- "Today's tasks" bar: same slot and look as the now-focusing bar ----- */
+
+.focus-tasks-dropdown {
+    position: relative;
+}
+
+.focus-tasks-header {
+    display: flex;
+    align-items: center;
+    background-color: var(--glass-pane);
+    border: 1px solid var(--glass-border);
+    color: var(--text);
+    cursor: pointer;
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    transition: background-color 0.2s;
+}
+
+.focus-tasks-header:hover {
+    background-color: rgba(255, 255, 255, 0.15);
+}
+
+.focus-tasks-title {
+    font-size: 1em;
+    font-weight: 600;
+    line-height: 1;
+}
+
+.focus-tasks-count {
+    margin-left: auto;
+    min-width: 1.7em;
+    padding: .25em .6em;
+    border-radius: 1em;
+    background: rgba(255, 255, 255, 0.2);
+    font-size: .8em;
+    font-weight: 700;
+    line-height: 1;
+    text-align: center;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Thin chevron drawn with borders (the old "▼" glyph was heavy and font-dependent). */
+.focus-tasks-chevron {
+    flex: none;
+    width: .55em;
+    height: .55em;
+    margin: 0 .3em .3em .1em;
+    font-size: .8em;
+    overflow: hidden;             /* hides the "▼" text node; the arrow is the borders below */
+    text-indent: -999em;
+    border-right: .14em solid var(--muted);
+    border-bottom: .14em solid var(--muted);
+    transform: rotate(45deg);
+    transition: transform 0.2s ease;
+}
+
+.focus-tasks-dropdown.is-open .focus-tasks-chevron {
+    transform: translateY(.3em) rotate(225deg);
+}
+
+/* The list. On the page it drops down under the bar; in PiP it pops up above it
+   (see body.is-pip below). It is a regular px UI and only the list scrolls. */
+/* In stage units like everything else: it scales with the stage on the page and in PiP. */
+.focus-tasks-content {
+    --pop-shift: -10px;             /* slide-in direction */
+    position: absolute;
+    top: calc(100% + 1em);
+    left: 0;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: .5em;
+    max-height: calc(40 * var(--u));
+    padding: .6em;
+    overflow: hidden;
+    font-size: var(--bar-font);
+    border-radius: var(--radius);
+    background: rgba(20, 20, 20, 0.62);
+    border: 1px solid var(--glass-border);
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.4);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transform: translateY(var(--pop-shift));
+    transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s;
+}
+
+.focus-tasks-dropdown.is-open .focus-tasks-content {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    transform: translateY(0);
+}
+
+.focus-tasks-content .tasks {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    gap: .4em;
+}
+
+.focus-tasks-content .task-row {
+    width: 100%;
+    height: var(--bar-h);
+    flex: none;
+}
+
+.focus-add-task-btn {
+    flex: none;
+    width: 100%;
+    height: 2.4em;
+    font-size: .85em;
+}
+
+/* PiP popout: grows upward from the bar. The add-task modal lives in the main window,
+   so no "+ Task" here. */
+body.is-pip .focus-tasks-content {
+    --pop-shift: 10px;
+    top: auto;
+    bottom: calc(100% + 1em);
+    max-height: calc(24 * var(--u));   /* what fits above the bar */
+}
+
+body.is-pip .focus-add-task-btn {
+    display: none;
+}
+
+
+
+
+.focus-music {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    width: auto;
+    height: auto;
+    padding: 0;
+    border: none;
+    box-shadow: none;
+    flex: none;
+}
+
+.music-content {
+    display: flex; /* Changed from none */
+    position: absolute;
+    bottom: calc(100% + 12px);
+    left: 0;
+    width: 600px;
+    height: min(650px, 75vh); /* Or whatever height you prefer */
+    padding: 16px;
+    border-radius: var(--radius);
+    background: var(--glass-pane);
+    border: 1px solid var(--glass-border);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .08), 0 10px 28px rgba(0, 0, 0, .16);
+    z-index: 40;
+    flex-direction: column;
+    
+    /* Animation Styles */
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transform: translateY(10px) scale(0.96);
+    transform-origin: bottom left;
+    transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s;
+}
+
+.focus-music.is-open .music-content {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    transform: translateY(0) scale(1);
+    transition: opacity 0.2s ease, transform 0.2s ease, visibility 0s;
+}
+
+.music-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--line);
+}
+
+.music-tabs {
+    display: flex;
+    gap: 16px;
+}
+
+.music-tab {
+    background: transparent;
+    color: var(--muted);
+    font-size: 15px;
+    font-weight: 600;
+    padding: 4px 0;
+    cursor: pointer;
+    transition: color 0.2s ease;
+}
+
+.music-tab:hover {
+    color: var(--text);
+}
+
+.music-tab.is-active {
+    color: var(--text);
+    border-bottom: 2px solid var(--text);
+}
+
+.music-tab-content {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0;
+}
+
+/* Ambient Grid */
+.music-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    padding: 8px 4px;
+}
+
+.sound-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 16px 8px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius);
+    color: var(--muted);
+    transition: all 0.2s ease;
+    cursor: pointer;
+}
+
+.sound-btn:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text);
+}
+
+.sound-btn.is-active {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.2);
+    color: var(--accent);
+    box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 15%, transparent);
+}
+
+.sound-icon {
+    font-size: 28px;
+    line-height: 1;
+}
+
+.sound-name {
+    font-size: 11px;
+    text-align: center;
+    font-weight: 500;
+}
+
+/* Spotify Integration */
+.spotify-input-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+.spotify-input-row input {
+    flex: 1;
+    background: var(--glass-inset);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius);
+    padding: 0 12px;
+    color: var(--text);
+    font: inherit;
+    font-size: 13px;
+    outline: none;
+}
+
+.spotify-input-row input:focus {
+    border-color: rgba(255, 255, 255, 0.4);
+}
+
+.spotify-embed-container {
+    width: 100%;
+    height: 100%;
+    min-height: 352px;
+    border-radius: var(--radius);
+    overflow: hidden;
+    background: rgba(0, 0, 0, 0.2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.spotify-empty {
+    color: var(--muted);
+    font-size: 13px;
+}
+
+.spotify-embed-container iframe {
+    border: none;
+    width: 100%;
+    height: 100%;
 }

@@ -158,7 +158,7 @@
     overflow: hidden;
     padding: 4px 5px;
     border-left: 3px solid var(--category-color);
-    border-radius: 5px; /* SPECIAL CASE RADIUS */
+    border-radius: var(--radius-sm);
     background: color-mix(in srgb, var(--category-color) 12%, var(--card));
     color: var(--text);
     font-size: 10px;
@@ -339,17 +339,10 @@
     font-size: 11px;
 }
 
-.task-detail-field input,
-.task-detail-field select {
+/* look comes from .ui-field / .ui-control; this only sizes them */
+.task-detail-field :is(input, select) {
     width: 100%;
-    min-width: 0;
-    padding: 6px 8px;
-    border: 1px solid var(--line);
-    border-radius: var(--radius);
-    background: var(--glass-inset);
-    color: var(--text);
-    font: inherit;
-    font-size: 12px;
+    justify-content: flex-start;
 }
 
 .task-detail-sessions {
@@ -399,6 +392,12 @@
 
 .task-detail-sessions .task-properties {
     margin-top: 8px;
+}
+
+/* Created / completed / raindrops: plain facts under the fields, not inside "Focus sessions" */
+.task-meta {
+    padding-top: 10px;
+    border-top: 1px solid var(--line);
 }
 
 .task-properties {
@@ -563,16 +562,16 @@
 
 .task[data-priority="high"] .task-priority-dot {
     background: #ff5c5c;
-    box-shadow: 0 0 0 2px rgba(255, 92, 92, 0.25);
+    box-shadow: 0 0 0 var(--ring, 2px) rgba(255, 92, 92, 0.25);
 }
 .task[data-priority="medium"] .task-priority-dot {
-    background: #ffb54c;
-    box-shadow: 0 0 0 2px rgba(255, 181, 76, 0.22);
+    background: var(--warm);
+    box-shadow: 0 0 0 var(--ring, 2px) rgba(255, 181, 76, 0.22);
 }
 
 .task[data-priority="low"] .task-priority-dot {
     background: #5cc77a;
-    box-shadow: 0 0 0 2px rgba(92, 199, 122, 0.22);
+    box-shadow: 0 0 0 var(--ring, 2px) rgba(92, 199, 122, 0.22);
 }
 
 .category {
@@ -582,6 +581,17 @@
     letter-spacing: 0.5px;
     white-space: nowrap;
     flex: none;
+}
+
+.eta {
+    flex: none;
+    padding: 2px 6px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    color: var(--muted);
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
 }
 
 .timer {

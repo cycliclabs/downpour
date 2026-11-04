@@ -4,6 +4,12 @@
 :root {
     --bg: #f6f7f9;
     --radius: 12px;
+    --radius-sm: 5px;
+    --accent: #00ff84;
+    --accent-hover: #00cc6a;
+    --rain: #7dd3fc;
+    --warm: #ffb54c;
+    --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23f7f9fb' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
     --pomodoro-break: #d65353;
     --card: rgba(20, 20, 20, .35);
     --text: #f7f9fb;
@@ -89,7 +95,7 @@ button {
     min-height: auto; /* OVERRIDES the global 44px min-height conflict! */
     margin: 0;
     padding: 0 20px;
-    border-radius: 9px;
+    border-radius: calc(var(--radius) - 3px);
     background: transparent;
     color: var(--muted);
     font-weight: 500;
@@ -151,34 +157,45 @@ button {
     pointer-events: auto
 }
 
-.ui-button,
-.ui-control {
+/* ===== One design language for interactive elements =====
+   Tier 1  .ui-button   square icon button
+   Tier 2  .ui-control  standard button / select / label-toggle
+   Tier 3  .ui-field    text-entry (input, textarea)
+   Modifiers: .is-primary (accent fill), .is-stage (large, em-sized, for the clock overlays).
+   Every look below is defined here once; page css only positions things. */
+:is(.ui-button, .ui-control, .ui-field, .category-color, .remove-category, .background-choice-no-image) {
+    background-color: var(--glass-inset);
+    background-image: none;
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius);
+    color: var(--text);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 3px 10px rgba(0, 0, 0, .1);
+    transition: background-color .2s ease, border-color .2s ease, box-shadow .2s ease, color .2s ease, transform .15s ease;
+}
+
+:is(.ui-button, .ui-control) {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    border-radius: var(--radius);
-    background-color: var(--glass-inset);
-    background-image: none;
-    border: 1px solid rgba(255, 255, 255, 0.3);
-    color: var(--text);
     font: 500 13px/1 'DM Sans', system-ui, sans-serif;
     cursor: pointer;
     text-decoration: none;
-    box-shadow: 
-        inset 0 1px 0 rgba(255, 255, 255, 0.25),
-        0 0 14px rgba(255, 255, 255, 0.18),
-        0 8px 24px rgba(0, 0, 0, 0.3);
-    backdrop-filter: var(--glass-blur);
-    -webkit-backdrop-filter: var(--glass-blur);
-    transition: background-color .2s ease, border-color .2s ease, box-shadow .2s ease, color .2s ease;
 }
 
-.ui-button:hover,
-.ui-control:hover {
-    border-color: rgba(255, 255, 255, 0.5);
-    box-shadow: 
-        inset 0 1px 0 rgba(255, 255, 255, 0.35),
-        0 0 18px rgba(255, 255, 255, 0.3);
+/* hover: brighter edge + the small lift, identical everywhere */
+:is(.ui-button, .ui-control, .page-nav-button, .sound-btn, .music-tab, .font-choice, .background-choice, .brain-dump-close):hover {
+    transform: translateY(-1px);
+}
+
+:is(.ui-button, .ui-control, .page-nav-button, .sound-btn, .music-tab, .font-choice, .background-choice, .brain-dump-close):active {
+    transform: translateY(0);
+}
+
+:is(.ui-button, .ui-control):hover {
+    border-color: rgba(255, 255, 255, .5);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .35), 0 0 18px rgba(255, 255, 255, .3);
 }
 
 .ui-button {
@@ -188,11 +205,62 @@ button {
     min-height: 40px;
     padding: 0;
     font-size: 19px;
-    border: 1px solid rgba(255, 255, 255, 0.3);
-    box-shadow: 
-        inset 0 1px 0 rgba(255, 255, 255, 0.25),
-        0 0 14px rgba(255, 255, 255, 0.18),
-        0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+.ui-control {
+    height: 32px;
+    padding: 0 12px;
+    gap: 6px;
+}
+
+.ui-field {
+    height: 32px;
+    min-width: 0;
+    padding: 0 12px;
+    font: 500 13px/1.4 'DM Sans', system-ui, sans-serif;
+    outline: none;
+}
+
+textarea.ui-field {
+    height: auto;
+    padding: 10px 12px;
+    resize: none;
+}
+
+.ui-field::placeholder {
+    color: var(--muted);
+    opacity: .7;
+}
+
+.ui-field:focus {
+    border-color: rgba(255, 255, 255, .6);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .15), 0 0 14px rgba(255, 255, 255, .2);
+}
+
+/* primary action (accent fill) */
+.ui-control.is-primary {
+    background-color: var(--accent);
+    border-color: transparent;
+    color: #04210f;
+    font-weight: 700;
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.ui-control.is-primary:hover {
+    background-color: var(--accent-hover);
+    border-color: transparent;
+    box-shadow: 0 6px 16px color-mix(in srgb, var(--accent) 50%, transparent);
+}
+
+/* large variant for the clock overlays: same look, sized in stage units (1em = 1% of the stage) */
+:is(.ui-control, .ui-field).is-stage {
+    height: auto;
+    padding: .45em .9em;
+    gap: .4em;
+    border-radius: .4em;
+    font-size: 2.8em;
+    font-weight: 600;
+    line-height: 1;
 }
 
 .ui-button img {
@@ -200,16 +268,10 @@ button {
     height: 17px;
 }
 
-.ui-control {
-    height: 32px; /* Reduced from 40px */
-    padding: 0 12px; /* Reduced from 16px */
-    gap: 6px;
-}
-
-select.ui-control:not(.no-arrow) {
+:is(select.ui-control:not(.no-arrow), .trend-multi-btn) {
     appearance: none;
     padding-right: 28px;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23f7f9fb' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+    background-image: var(--chevron);
     background-repeat: no-repeat;
     background-position: right 8px center; /* Moved left to match smaller padding */
     background-size: 12px; /* Smaller arrow */
@@ -237,15 +299,6 @@ label.ui-control input[type="checkbox"] {
 }
 
 
-:is(.pomodoro-settings input, .brain-dump textarea, .category-color, .remove-category, .background-choice-no-image) {
-    background-color: var(--glass-inset);
-    background-image: none;
-    border-color: var(--glass-border);
-    color: var(--text);
-    backdrop-filter: var(--glass-blur);
-    -webkit-backdrop-filter: var(--glass-blur);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 3px 10px rgba(0, 0, 0, .1);
-}
 
 
 
@@ -257,10 +310,6 @@ label.ui-control input[type="checkbox"] {
 
 .brain-dump.is-open {
     box-shadow: 0 18px 42px rgba(17, 17, 17, 0.18)
-}
-
-body[data-focus-session="active"] .focus-task-area:not([hidden]) {
-    display: none
 }
 
 
@@ -345,21 +394,6 @@ html {
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-/* ----------------------------------------------- GLASS STUFF ---------------------------------------------- clear needed */
-
 :is(.panel, .task-area, .box, .page-selector) {
     background-color: var(--glass-pane);
     background-image: none;
@@ -390,12 +424,6 @@ body::before {
     background: radial-gradient(circle at center, transparent 35%, rgba(0, 0, 0, 0.75) 100%);
 }
 
-.ui-button:hover {
-    border-color: rgba(255, 255, 255, 0.5);
-    box-shadow: 
-        inset 0 1px 0 rgba(255, 255, 255, 0.35),
-        0 0 18px rgba(255, 255, 255, 0.3);
-}
 
 .page-nav-button:hover,
 .page-nav-button.is-active {
@@ -405,7 +433,7 @@ body::before {
 
 .background-choices {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr)); /* CHANGED FROM 3 TO 2 */
     gap: 6px;
 }
 
@@ -453,23 +481,106 @@ body::before {
     text-shadow: 0 1px 2px rgba(0, 0, 0, .55);
 }
 
-
-/* Interactive Elements & Fields Glass */
-:is(.ui-button, .ui-control, .pomodoro-settings input, .brain-dump textarea, .category-color, .remove-category, .background-choice-no-image) {
-    background-color: var(--glass-inset);
-    background-image: none;
-    border-color: var(--glass-border);
-    color: var(--text);
-    backdrop-filter: var(--glass-blur);
-    -webkit-backdrop-filter: var(--glass-blur);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 3px 10px rgba(0, 0, 0, .1);
+/* Raindrops + streak, top right next to settings */
+.stat-chips {
+    display: flex;
+    align-items: center;
+    gap: 7px;
 }
 
-/* Clock Panel Transparent Reset */
-.clock-panel {
-    background: transparent;
-    border-color: transparent;
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-    box-shadow: none;
+.stat-chip {
+    height: 40px;
+    padding: 0 14px;
+    gap: 7px;
+    cursor: default;
+    font-size: 14px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
 }
+
+.stat-chip svg {
+    width: 16px;
+    height: 16px;
+    flex: none;
+}
+
+.stat-raindrops svg {
+    color: var(--rain);
+}
+
+.stat-streak svg {
+    color: var(--warm);
+}
+
+.stat-streak.is-idle {
+    color: var(--muted);
+}
+
+.stat-streak.is-idle svg {
+    color: var(--muted);
+}
+
+
+
+
+
+
+
+
+/* YouTube background (settings > Background). Sits above the page background image, below the vignette
+   (body::before, z-index -1) and the app. The 16:9 frame is scaled up to cover the whole window. */
+.bg-video {
+    position: fixed;
+    inset: 0;
+    z-index: -2;
+    overflow: hidden;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .8s ease;
+}
+
+.bg-video.is-ready {
+    opacity: 1;
+}
+
+.bg-video iframe {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: max(100vw, 177.78vh);
+    height: max(100vh, 56.25vw);
+    border: 0;
+    transform: translate(-50%, -50%);
+}
+
+.video-input-row {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.video-input-row .ui-field {
+    flex: 1;
+}
+
+.settings-note {
+    margin: 8px 0 0;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.4;
+}
+
+.settings-note:empty {
+    display: none;
+}
+
+.settings-note.is-error {
+    color: #ff8a8a;
+}
+
+.ui-control[hidden] {
+    display: none;
+}
+
+.account-form{display:flex;flex-direction:column;gap:10px;max-width:320px}
+.account-form[hidden]{display:none}
