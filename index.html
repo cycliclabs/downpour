@@ -61,14 +61,24 @@
 
       <div class="upper-bar-right">
         <div class="stat-chips">
-          <span class="ui-control stat-chip stat-raindrops" title="Raindrops: earned by finishing tasks on time">
+          <button type="button" class="ui-control stat-chip stat-raindrops" data-popover="raindropPopover" aria-expanded="false" aria-controls="raindropPopover" title="Raindrops">
             <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false"><path d="M12 2.5c3.6 4.3 6 7.3 6 10.6a6 6 0 0 1-12 0c0-3.3 2.4-6.3 6-10.6z"></path></svg>
             <b id="raindropCount">0</b>
-          </span>
-          <span class="ui-control stat-chip stat-streak" id="streakChip" title="Day streak: days in a row with a completed task">
+          </button>
+          <button type="button" class="ui-control stat-chip stat-streak" id="streakChip" data-popover="streakPopover" aria-expanded="false" aria-controls="streakPopover" title="Day streak">
             <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false"><path d="M12 2c.5 3 2 4.6 3.6 6.3C17.3 10.1 19 12 19 14.8A7 7 0 0 1 5 15c0-1.7.6-3.1 1.7-4.3.3 1.5 1.2 2.4 2.3 2.8C8.3 10.7 9.6 5.6 12 2z"></path></svg>
             <b id="streakCount">0</b>
-          </span>
+          </button>
+          <div class="panel stat-popover" id="raindropPopover" hidden>
+            <h2 class="panel-title">Raindrops</h2>
+            <p class="settings-note"><b>How to earn</b><br>Finish tasks that have an estimate. On target, faster and slower all pay out.</p>
+            <p class="settings-note"><b>Use</b><br>Coming later</p>
+          </div>
+          <div class="panel stat-popover" id="streakPopover" hidden>
+            <h2 class="panel-title">Day streak</h2>
+            <p class="settings-note"><b>How to earn</b><br>Complete at least one task every day.</p>
+            <p class="settings-note"><b>Use</b><br>Coming later</p>
+          </div>
         </div>
         <button class="ui-button" id="settingsButton" type="button" aria-label="Open Settings" aria-pressed="false" title="Settings">
           <img src="icons/settings.svg">
@@ -131,12 +141,12 @@
           <h2>How long will <span class="eta-task" id="etaTaskName"></span> take?</h2>
           <div class="eta-chips" id="etaChips"></div>
           <form class="eta-form" id="etaForm">
-            <input class="ui-field is-stage" id="etaMinutes" type="number" min="1" max="1440" step="1" inputmode="numeric" placeholder="minutes" aria-label="Estimated minutes">
-            <button class="ui-control is-stage is-primary" type="submit">Start</button>
+            <input class="ui-field" id="etaMinutes" type="number" min="1" max="1440" step="1" inputmode="numeric" placeholder="minutes" aria-label="Estimated minutes">
+            <button class="ui-control" type="submit">Start</button>
           </form>
           <div class="eta-links">
-            <button class="ui-control is-stage" type="button" id="etaSkip">Skip estimate</button>
-            <button class="ui-control is-stage" type="button" id="etaCancel">Cancel</button>
+            <button class="ui-control" type="button" id="etaSkip">Skip estimate</button>
+            <button class="ui-control" type="button" id="etaCancel">Cancel</button>
           </div>
         </div>
 
@@ -152,7 +162,7 @@
         <div class="checkin-display" id="checkinDisplay" hidden aria-live="assertive">
           <h2>Are you still here?</h2>
           <p>Task stops in <span id="checkinCountdown">30</span>s</p>
-          <button class="ui-control is-stage is-primary" id="checkinConfirm" type="button">Yes, I'm here</button>
+          <button class="ui-control" id="checkinConfirm" type="button">Yes, I'm here</button>
         </div>
 
       </section>
@@ -280,6 +290,7 @@
     </section>
 
     <section class="page-view analytics-page" data-page-view="analytics" hidden>
+      <div class="analytics-top">
       <section class="panel" id="focusActivity">
         <div class="activity-heading toolbar">
           <h2 class="panel-title">Focus activity</h2>
@@ -339,6 +350,7 @@
         </div>
         <div id="activityTrendChart" class="focus-trend-chart" aria-live="polite"></div>
       </section>
+      </div>
       <section class="panel" id="timeLine" aria-labelledby="calendarTitle">
         <div class="timeline-heading">
           <h2 class="panel-title">Timeline</h2>
@@ -355,6 +367,7 @@
         <div class="focus-label">Total focus time</div>
         <div id="focusProgress"></div>
       </section>
+      <div id="analyticsWidgets"></div>
     </section>
   </div>
 
@@ -408,9 +421,9 @@
           <p style="font-size: 13px; color: var(--muted); margin: 0 0 12px;">Coming soon...</p>
 
           <h3 style="margin-top: 24px;">YouTube Video</h3>
-          <div class="video-input-row">
+          <div class="field-row">
             <input class="ui-field" type="text" id="backgroundVideoUrl" placeholder="Paste YouTube link..." aria-label="YouTube link">
-            <button class="ui-control is-primary" id="backgroundVideoBtn" type="button">Set</button>
+            <button class="ui-control" id="backgroundVideoBtn" type="button">Set</button>
             <button class="ui-control" id="backgroundVideoClear" type="button" hidden>Remove</button>
           </div>
           <p class="settings-note" id="backgroundVideoStatus" aria-live="polite"></p>
@@ -458,14 +471,14 @@
           <form id="accountForm" class="account-form">
             <input class="ui-field" type="email" id="accountEmail" placeholder="Email" autocomplete="email" aria-label="Email">
             <input class="ui-field" type="password" id="accountPassword" placeholder="Password" autocomplete="current-password" aria-label="Password">
-            <div class="video-input-row">
-              <button class="ui-control is-primary" id="accountSignIn" type="button">Sign in</button>
+            <div class="field-row">
+              <button class="ui-control" id="accountSignIn" type="button">Sign in</button>
               <button class="ui-control" id="accountSignUp" type="button">Create account</button>
             </div>
           </form>
           <div id="accountSignedIn" class="account-form" hidden>
             <p class="settings-note" id="accountWho"></p>
-            <div class="video-input-row"><button class="ui-control" id="accountSignOut" type="button">Sign out</button></div>
+            <div class="field-row"><button class="ui-control" id="accountSignOut" type="button">Sign out</button></div>
           </div>
           <p class="settings-note" id="accountStatus" aria-live="polite"></p>
         </section>
@@ -486,7 +499,10 @@
 
         <section class="settings-tab" id="tab-tasks" hidden>
           <h3>Categories</h3>
-          <button class="ui-control" id="addCat" style="width: 100%; margin-bottom: 16px;">+ New category</button>
+          <div class="field-row">
+            <input class="ui-field" type="text" id="newCategoryName" placeholder="New category name..." maxlength="40" aria-label="New category name">
+            <button class="ui-control" id="addCat" type="button">Add</button>
+          </div>
           <div class="category-editor" id="categoryEditor"></div>
         </section>
 

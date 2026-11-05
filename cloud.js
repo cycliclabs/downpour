@@ -33,9 +33,16 @@ class CloudSync {
     this.client = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     this.el.signIn.onclick = () => this.auth("signIn");
     this.el.signUp.onclick = () => this.auth("signUp");
-    this.el.signOut.onclick = () => this.client.auth.signOut();
+    this.el.signOut.onclick = async () => {
+      await this.client.auth.signOut({ scope: "local" });
+      this.onSession(null);
+    };
     this.el.form.onsubmit = e => { e.preventDefault(); this.auth("signIn"); };
-    this.client.auth.onAuthStateChange((_event, session) => this.onSession(session));
+    this.client.auth.onAuthStateChange((_event, session) => {
+      // Never call supabase from inside this callback directly: it holds the auth lock and
+      // would deadlock (which also blocks signOut). Defer to the next tick.
+      setTimeout(() => this.onSession(session), 0);
+    });
     this.client.auth.getSession().then(({ data }) => this.onSession(data.session));
   }
 

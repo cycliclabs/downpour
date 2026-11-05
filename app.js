@@ -168,6 +168,7 @@ class FocusApp {
       this.renderPomodoro();
       this.renderLiveTimers();
       this.renderFocusSummary();
+      this.renderAnalyticsWidgets();
       if (this.lastFocusTaskDate !== this.today()) {
         this.lastFocusTaskDate = this.today();
         this.renderTasks();
@@ -192,6 +193,8 @@ class FocusApp {
       focusNowTask: query("#focusNowTask"),
       timeLine: query("#timeLine"),
       backgroundChoices: query("#backgroundChoices"),
+      newCategoryName: query("#newCategoryName"),
+      analyticsWidgets: query("#analyticsWidgets"),
       backgroundVideoUrl: query("#backgroundVideoUrl"),
       backgroundVideoBtn: query("#backgroundVideoBtn"),
       backgroundVideoClear: query("#backgroundVideoClear"),
@@ -305,7 +308,25 @@ class FocusApp {
       this.elements.focusTasksToggle.setAttribute("aria-expanded", String(isOpen));
     };
 
+    // raindrop / streak popovers
+    const popoverChips = [...this.document.querySelectorAll("[data-popover]")];
+    const closePopovers = () => popoverChips.forEach(chip => {
+      this.document.getElementById(chip.dataset.popover).hidden = true;
+      chip.setAttribute("aria-expanded", "false");
+    });
+    popoverChips.forEach(chip => chip.addEventListener("click", event => {
+      event.stopPropagation();
+      const popover = this.document.getElementById(chip.dataset.popover);
+      const open = popover.hidden;
+      closePopovers();
+      popover.hidden = !open;
+      chip.setAttribute("aria-expanded", String(open));
+    }));
+    this.document.addEventListener("click", event => { if (!event.target.closest(".stat-popover")) closePopovers(); });
+    this.document.addEventListener("keydown", event => { if (event.key === "Escape") closePopovers(); });
+
     this.document.querySelector("#addCat").onclick = () => this.addCategory();
+    this.elements.newCategoryName.onkeydown = event => { if (event.key === "Enter") this.addCategory(); };
     this.elements.fullscreenButton.onclick = () => this.toggleFullscreen();
     this.elements.pomodoroPipButton.onclick = () => this.toggleDocumentPiP();
     this.elements.clockFontChoices.onclick = event => {
@@ -533,7 +554,7 @@ class FocusApp {
     };
     this.elements.checkinConfirm.onclick = () => this.confirmCheckIn();
     this.elements.etaChips.innerHTML = FocusApp.ETA_PRESETS.map(minutes =>
-      `<button class="ui-control is-stage" type="button" data-minutes="${minutes}">${minutes < 60 ? `${minutes}m` : `${minutes / 60}h`}</button>`).join("");
+      `<button class="ui-control" type="button" data-minutes="${minutes}">${minutes < 60 ? `${minutes}m` : `${minutes / 60}h`}</button>`).join("");
     this.elements.etaChips.onclick = event => {
       const chip = event.target.closest("[data-minutes]");
       if (chip) this.chooseEta(Number(chip.dataset.minutes));
@@ -568,6 +589,7 @@ class FocusApp {
         if (isActive) button.setAttribute("aria-current", "page");
         else button.removeAttribute("aria-current");
       });
+      this.renderAnalyticsWidgets();
     }
   
   closeTaskModal() {
@@ -693,6 +715,7 @@ class FocusApp {
     this.renderCalendar();
     this.renderActivityCalendar();
     this.renderCategoryEditor();
+    this.renderAnalyticsWidgets();
   }
 
   renderSelectedTaskDate() {
@@ -1079,7 +1102,7 @@ class FocusApp {
     this.document.body.style.backgroundImage = image === "none" ? "none" : `url("${image}")`;
     this.elements.backgroundChoices.querySelectorAll("[data-background]").forEach(choice => {
       const selected = choice.dataset.background === image;
-      choice.classList.toggle("selected", selected);
+      choice.classList.toggle("is-active", selected);
       choice.setAttribute("aria-pressed", String(selected));
     });
     if (persist) localStorage.setItem("focus-background-image", image); if (persist) window.dispatchEvent(new Event("focus-changed"));
@@ -1110,7 +1133,7 @@ class FocusApp {
       if (response.ok) {
         const html = await response.text();
         for (const match of html.matchAll(/href="([^"]+\.(?:ttf|otf|woff2?))"/gi)) {
-          const name = decodeURIComponent(match[1].split("/").pop());
+          const name = decodeURIComponent(match[1]).split(/[\\/]/).pop();
           add(name, new URL(`fonts/${encodeURIComponent(name)}`, location.href).href);
         }
       }
@@ -1158,7 +1181,7 @@ class FocusApp {
     panel.style.setProperty("--clock-weight", String(this.clockFonts.get(family)?.weight ?? 700));
     this.elements.clockFontChoices.querySelectorAll("[data-font]").forEach(choice => {
       const selected = choice.dataset.font === family;
-      choice.classList.toggle("selected", selected);
+      choice.classList.toggle("is-active", selected);
       choice.setAttribute("aria-pressed", String(selected));
     });
     if (persist) localStorage.setItem("focus-clock-font", family); if (persist) window.dispatchEvent(new Event("focus-changed"));
@@ -1169,7 +1192,7 @@ class FocusApp {
       `<button class="font-choice" type="button" data-font="${this.escape(font.family)}" aria-pressed="false"><span class="font-choice-sample" style="font-family:'${this.escape(font.family)}',Impact,sans-serif;font-weight:${font.weight}">12:34</span><span class="font-choice-name">${this.escape(font.family)}</span></button>`
     ).join("");
     this.elements.clockFontChoices.querySelectorAll("[data-font]").forEach(choice =>
-      choice.classList.toggle("selected", choice.dataset.font === this.clockFont));
+      choice.classList.toggle("is-active", choice.dataset.font === this.clockFont));
   }
 
   renderBackgroundChoices() {
@@ -1200,19 +1223,35 @@ class FocusApp {
   }
 
   renderCategoryEditor() {
+    const counts = new Map();
+    this.store.state.tasks.forEach(task => counts.set(task.category, (counts.get(task.category) || 0) + 1));
     this.elements.categoryEditor.innerHTML = this.store.state.categories.length
       ? this.store.state.categories.map(category => `<div class="category-row" data-category-id="${this.escape(category.id)}">
-          <span class="category-row-name"><span class="dot" style="background:${this.escape(category.color)}"></span>${this.escape(category.name)}</span>
           <input class="category-color" type="color" value="${this.colorPickerValue(category.color)}" aria-label="Change ${this.escape(category.name)} color">
-          <button class="remove-category" type="button" data-action="remove-category" title="Remove ${this.escape(category.name)}" aria-label="Remove ${this.escape(category.name)}">×</button>
+          <input class="ui-field category-name" type="text" value="${this.escape(category.name)}" maxlength="40" aria-label="Category name">
+          <span class="count">${counts.get(category.id) || 0} ${(counts.get(category.id) || 0) === 1 ? "task" : "tasks"}</span>
+          <button class="ui-control remove-category" type="button" data-action="remove-category" title="Remove ${this.escape(category.name)}" aria-label="Remove ${this.escape(category.name)}">×</button>
         </div>`).join("")
       : '<div class="category-editor-empty">No categories yet.</div>';
 
     this.elements.categoryEditor.querySelectorAll(".category-row").forEach(row => {
       const categoryId = row.dataset.categoryId;
       row.querySelector(".category-color").oninput = event => this.changeCategoryColor(categoryId, event.target.value);
+      const nameField = row.querySelector(".category-name");
+      nameField.onchange = () => this.renameCategory(categoryId, nameField.value);
+      nameField.onkeydown = event => { if (event.key === "Enter") nameField.blur(); };
       row.querySelector('[data-action="remove-category"]').onclick = () => this.removeCategory(categoryId);
     });
+  }
+
+  renameCategory(id, name) {
+    const category = this.store.state.categories.find(item => item.id === id);
+    const clean = name.trim();
+    if (!category) return;
+    if (!clean) { this.renderCategoryEditor(); return; }
+    category.name = clean;
+    this.store.save();
+    this.render();
   }
 
   changeCategoryColor(id, color) {
@@ -1221,8 +1260,6 @@ class FocusApp {
     category.color = color;
     this.store.save();
     this.renderTasks();
-    const row = this.elements.categoryEditor.querySelector(`[data-category-id="${this.escape(id)}"] .dot`);
-    if (row) row.style.background = color;
   }
 
   removeCategory(id) {
@@ -1529,6 +1566,95 @@ class FocusApp {
     }
   }
 
+
+  // ---- Analytics widgets ---------------------------------------------------------
+  // Built only from parts the page already has: .panel, .panel-title, .focus-total + .focus-label
+  // (the big number) and .focus-goal-label + .focus-goal-track (a labelled row, optionally with a bar).
+  analyticsData(now = Date.now()) {
+    const { tasks, categories } = this.store.state;
+    const perDay = new Map(), perCategory = new Map(), perTask = new Map();
+    const perHour = Array(24).fill(0);
+    tasks.forEach(task => this.taskSessions(task, now).forEach(session => {
+      const a = new Date(session.start).getTime(), b = new Date(session.end).getTime();
+      if (!Number.isFinite(a) || !Number.isFinite(b) || b <= a) return;
+      const add = (map, key) => map.set(key, (map.get(key) || 0) + (b - a));
+      add(perTask, task.id);
+      add(perCategory, task.category || "");
+      for (let cursor = a; cursor < b;) {
+        const date = new Date(cursor);
+        const next = new Date(date.getFullYear(), date.getMonth(), date.getDate(), date.getHours() + 1).getTime();
+        const slice = Math.min(b, next) - cursor;
+        perHour[date.getHours()] += slice;
+        const key = this.dateKey(date);
+        perDay.set(key, (perDay.get(key) || 0) + slice);
+        cursor += slice;
+      }
+    }));
+    return { tasks, categories, perDay, perCategory, perTask, perHour };
+  }
+
+  renderAnalyticsWidgets() {
+    const host = this.elements.analyticsWidgets;
+    if (!host || this.document.body.dataset.page !== "analytics") return;
+    const d = this.analyticsData();
+    const dur = ms => this.duration(ms);
+    const sum = list => list.reduce((total, ms) => total + ms, 0);
+    const pct = (part, whole) => whole > 0 ? Math.round((part / whole) * 100) : 0;
+    const dayKey = offset => { const x = new Date(); x.setDate(x.getDate() - offset); return this.dateKey(x); };
+    const dayTotal = key => d.perDay.get(key) || 0;
+    const totalMs = sum([...d.perDay.values()]);
+    const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    const hourLabel = h => `${h % 12 || 12} ${h < 12 ? "AM" : "PM"}`;
+    const change = (now, before) => before > 0 ? `${now >= before ? "+" : ""}${Math.round(((now - before) / before) * 100)}%` : "–";
+
+    // this week (since Monday) vs last week
+    const mondayOffset = (new Date().getDay() + 6) % 7;
+    const thisWeek = sum(Array.from({ length: mondayOffset + 1 }, (_, i) => dayTotal(dayKey(i))));
+    const lastWeek = sum(Array.from({ length: 7 }, (_, i) => dayTotal(dayKey(mondayOffset + 1 + i))));
+    const activeDays = [...d.perDay].filter(([, v]) => v > 0).length;
+
+    // time of day, day of week
+    const buckets = [["Morning · 5–12", 5, 12], ["Afternoon · 12–17", 12, 17], ["Evening · 17–22", 17, 22], ["Night · 22–5", 22, 29]]
+      .map(([label, from, to]) => ({ label, value: sum(Array.from({ length: to - from }, (_, i) => d.perHour[(from + i) % 24])) }));
+    const peakHour = d.perHour.indexOf(Math.max(...d.perHour));
+    const weekdayTotals = Array(7).fill(0);
+    d.perDay.forEach((ms, key) => { weekdayTotals[(new Date(`${key}T00:00:00`).getDay() + 6) % 7] += ms; });
+    const bestWeekday = weekdayTotals.indexOf(Math.max(...weekdayTotals));
+
+    // categories
+    const catName = id => d.categories.find(c => c.id === id)?.name || "Uncategorized";
+    const catColor = id => d.categories.find(c => c.id === id)?.color || "#999";
+    const catRows = [...d.perCategory].sort((x, y) => y[1] - x[1]).slice(0, 5);
+
+    // estimates: finished tasks that had an estimate and real focus time
+    const [lo, hi] = FocusApp.RAINDROPS.onTargetBand;
+    const rated = d.tasks.filter(t => t.done && t.estimateMs > 0 && (d.perTask.get(t.id) || 0) >= FocusApp.RAINDROPS.minFocusMs);
+    const ratio = t => (d.perTask.get(t.id) || 0) / t.estimateMs;
+    const faster = rated.filter(t => ratio(t) < lo).length;
+    const slower = rated.filter(t => ratio(t) > hi).length;
+    const onTarget = rated.length - faster - slower;
+
+    const bars = (items, fmt = dur) => {
+      const max = Math.max(0, ...items.map(i => i.value));
+      return items.map(i => ({ label: i.label, value: fmt(i.value), bar: max > 0 ? (i.value / max) * 100 : 0, color: i.color || "var(--rain)" }));
+    };
+    const widgets = [
+      { title: "This week", big: dur(thisWeek), label: "Focus time since Monday", rows: [
+        ...bars([{ label: "This week", value: thisWeek }, { label: "Last week", value: lastWeek }]),
+        { label: "Change", value: change(thisWeek, lastWeek) }, { label: "Days with focus, all time", value: activeDays }] },
+      { title: "Time of day", big: totalMs ? hourLabel(peakHour) : "–", label: "Most productive hour", rows: bars(buckets) },
+      { title: "Day of week", big: totalMs ? dayNames[bestWeekday] : "–", label: "Most productive weekday", rows: bars(dayNames.map((label, i) => ({ label, value: weekdayTotals[i] }))) },
+      { title: "Categories", big: catRows.length ? catName(catRows[0][0]) : "–", label: "Most focused category, all time",
+        rows: bars(catRows.map(([id, ms]) => ({ label: catName(id), value: ms, color: catColor(id) })), ms => `${dur(ms)} · ${pct(ms, totalMs)}%`) },
+      { title: "Estimates", big: rated.length ? `${pct(onTarget, rated.length)}%` : "–", label: "Finished tasks on target", rows:
+        bars([{ label: "Faster than estimated", value: faster }, { label: "On target", value: onTarget }, { label: "Slower than estimated", value: slower }], String) }
+    ];
+
+    const row = r => `<div class="focus-goal-label"><span>${this.escape(r.label)}</span><span>${this.escape(r.value)}</span></div>${
+      r.bar === undefined ? "" : `<div class="focus-goal-track"><span class="focus-goal-segment" style="width:${r.bar}%;background:${this.escape(r.color)}"></span></div>`}`;
+    const html = widgets.map(w => `<section class="panel"><h2 class="panel-title">${this.escape(w.title)}</h2><div class="focus-total">${this.escape(w.big)}</div><div class="focus-label">${this.escape(w.label)}</div>${w.rows.map(row).join("")}</section>`).join("");
+    if (html !== this.lastWidgetsHtml) { host.innerHTML = html; this.lastWidgetsHtml = html; }
+  }
 
   // ---- Colour helpers (OKLCH) ------------------------------------------------
   // Category colours are arbitrary, so ramps/lines are built in a perceptual space:
@@ -2268,14 +2394,13 @@ class FocusApp {
   }
 
   addCategory() {
-    const promptFn = typeof window !== "undefined" && typeof window.prompt === "function" ? window.prompt.bind(window) : null;
-    const name = promptFn ? promptFn("Category name:") : null;
-    if (!name?.trim()) return;
-
-    const cleanName = name.trim();
+    const field = this.elements.newCategoryName;
+    const cleanName = field.value.trim();
+    if (!cleanName) { field.focus(); return; }
     const id = `${cleanName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${Date.now()}`;
     const color = this.randomColor();
     this.store.addCategory({ id, name: cleanName, color });
+    field.value = "";
     this.selectedCategory = id;
     this.render();
   }

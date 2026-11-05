@@ -1,18 +1,74 @@
+/* One 3-column grid. Panels in the same row stretch to the same height; the timeline spans
+   the three rows next to the summary + widgets. */
 .analytics-page {
-    display: flex;
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 14px;
+    align-items: stretch;
     width: 100%;
 }
 
+.analytics-page > .panel,
+#analyticsWidgets > .panel {
+    height: auto;
+    min-width: 0;
+}
 
+#analyticsWidgets {
+    display: contents;
+}
 
-#focusActivity,
-.focus-trend,
-#timeLine,
-#focusSummary {
-    flex: 1 1 420px; /* Allows them to shrink or grow, with a flexible base width before wrapping */
-    min-width: 0;    /* Prevents flex items from overflowing their containers */
+/* First row: the activity heatmap keeps its natural width (it never grows past it); the trend takes the rest. */
+.analytics-top {
+    grid-column: 1 / -1;
+    display: flex;
+    gap: 14px;
+    align-items: stretch;
+    min-width: 0;
+}
+
+.analytics-top > .panel {
+    height: auto;
+    min-width: 0;
+}
+
+#focusActivity {
+    flex: 0 1 880px;
+}
+
+.focus-trend {
+    flex: 1 1 320px;
+}
+
+#timeLine {
+    grid-column: 1;
+    grid-row: span 3;
+}
+
+@media (max-width: 1100px) {
+    .analytics-page {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .analytics-top {
+        flex-wrap: wrap;
+    }
+
+    #focusActivity,
+    .focus-trend {
+        flex: 1 1 100%;
+    }
+
+    #timeLine {
+        grid-column: 1 / -1;
+        grid-row: auto;
+    }
+}
+
+@media (max-width: 700px) {
+    .analytics-page {
+        grid-template-columns: minmax(0, 1fr);
+    }
 }
 
 
@@ -59,7 +115,6 @@
     flex-direction: column;
     min-height: 300px;
     padding: 20px;
-    min-width: 850px;
     --activity-cell-size: 12px;
     --activity-cell-gap: 2px;
 }
@@ -78,6 +133,7 @@
 }
 
 .activity-scroll {
+    overflow-x: auto;
     background: black;
     border: 1px solid rgba(255, 255, 255, 0.05);
     border-radius: var(--radius);
@@ -232,7 +288,7 @@ button.activity-cell[aria-pressed="true"] {
     width: 100%;
     min-width: 0;
     padding: 20px;
-    height: 300px;
+    min-height: 300px;
 }
 
 .focus-trend-control {
@@ -323,10 +379,9 @@ button.activity-cell[aria-pressed="true"] {
 
 
 #timeLine {
-    display: block;
+    display: flex;
+    flex-direction: column;
     padding: 14px 10px;
-    max-width: 500px
-    
 }
 
 .timeline-heading {
@@ -442,7 +497,8 @@ button.activity-cell[aria-pressed="true"] {
 }
 
 .timeline-scroll {
-    height: 480px;
+    flex: 1 1 0;
+    min-height: 480px;
     overflow-y: auto;
     overflow-x: hidden;
     overscroll-behavior: contain;
@@ -525,9 +581,9 @@ button.activity-cell[aria-pressed="true"] {
 
 
 
-#focusSummary {
+#focusSummary,
+#analyticsWidgets > .panel {
     padding: 20px;
-    max-width: 400px;
 }
 
 .focus-total {

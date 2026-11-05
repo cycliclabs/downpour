@@ -161,9 +161,9 @@ button {
    Tier 1  .ui-button   square icon button
    Tier 2  .ui-control  standard button / select / label-toggle
    Tier 3  .ui-field    text-entry (input, textarea)
-   Modifiers: .is-primary (accent fill), .is-stage (large, em-sized, for the clock overlays).
+   State: .is-active (selected tile) is shared by .font-choice and .background-choice.
    Every look below is defined here once; page css only positions things. */
-:is(.ui-button, .ui-control, .ui-field, .category-color, .remove-category, .background-choice-no-image) {
+:is(.ui-button, .ui-control, .ui-field, .category-color, .background-choice-no-image) {
     background-color: var(--glass-inset);
     background-image: none;
     border: 1px solid var(--glass-border);
@@ -235,32 +235,6 @@ textarea.ui-field {
 .ui-field:focus {
     border-color: rgba(255, 255, 255, .6);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, .15), 0 0 14px rgba(255, 255, 255, .2);
-}
-
-/* primary action (accent fill) */
-.ui-control.is-primary {
-    background-color: var(--accent);
-    border-color: transparent;
-    color: #04210f;
-    font-weight: 700;
-    box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 40%, transparent);
-}
-
-.ui-control.is-primary:hover {
-    background-color: var(--accent-hover);
-    border-color: transparent;
-    box-shadow: 0 6px 16px color-mix(in srgb, var(--accent) 50%, transparent);
-}
-
-/* large variant for the clock overlays: same look, sized in stage units (1em = 1% of the stage) */
-:is(.ui-control, .ui-field).is-stage {
-    height: auto;
-    padding: .45em .9em;
-    gap: .4em;
-    border-radius: .4em;
-    font-size: 2.8em;
-    font-weight: 600;
-    line-height: 1;
 }
 
 .ui-button img {
@@ -458,6 +432,12 @@ body::before {
     border-radius: var(--radius);
 }
 
+/* selected tile: one look for the font and background pickers */
+:is(.font-choice, .background-choice).is-active {
+    border-color: var(--text);
+    background-color: rgba(255, 255, 255, .16);
+}
+
 .background-choice-no-image {
     display: block;
     width: 100%;
@@ -483,6 +463,7 @@ body::before {
 
 /* Raindrops + streak, top right next to settings */
 .stat-chips {
+    position: relative;
     display: flex;
     align-items: center;
     gap: 7px;
@@ -492,7 +473,6 @@ body::before {
     height: 40px;
     padding: 0 14px;
     gap: 7px;
-    cursor: default;
     font-size: 14px;
     font-weight: 600;
     font-variant-numeric: tabular-nums;
@@ -553,13 +533,13 @@ body::before {
     transform: translate(-50%, -50%);
 }
 
-.video-input-row {
+.field-row {
     display: flex;
     gap: 8px;
     margin-top: 12px;
 }
 
-.video-input-row .ui-field {
+.field-row .ui-field {
     flex: 1;
 }
 
@@ -584,3 +564,31 @@ body::before {
 
 .account-form{display:flex;flex-direction:column;gap:10px;max-width:320px}
 .account-form[hidden]{display:none}
+
+/* Raindrop / streak popovers (a plain .panel anchored under the chips) */
+.stat-popover {
+    position: absolute;
+    top: calc(100% + 10px);
+    right: 0;
+    width: 260px;
+    padding: 16px;
+    z-index: 50;
+}
+
+.stat-popover[hidden] {
+    display: none;
+}
+
+.stat-popover .settings-note b {
+    color: var(--text);
+}
+
+/* native dropdown lists: dark and readable */
+select.ui-control {
+    color-scheme: dark;
+}
+
+select.ui-control option {
+    background: #1d1f23;
+    color: var(--text);
+}
