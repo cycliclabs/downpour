@@ -1176,7 +1176,14 @@ class FocusApp {
         }
       }
     } catch { /* file:// or no listing */ }
-    const names = found.size ? [...found] : FocusApp.BUNDLED_FONT_FILES;   // 3. fallback
+    let names = [...found];
+    if (!names.length) {                           // 3. fallback: the bundled names, keeping only files that really exist
+      const checks = await Promise.all(FocusApp.BUNDLED_FONT_FILES.map(async name => {
+        try { return (await fetch(`fonts/${encodeURIComponent(name)}`, { method: "HEAD" })).ok ? name : null; }
+        catch { return name; }                     // file:// can't check: keep it
+      }));
+      names = checks.filter(Boolean);
+    }
     names.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
     const files = new Map(names.map(name => [name, new URL(`fonts/${encodeURIComponent(name)}`, location.href).href]));
 
@@ -1270,7 +1277,16 @@ class FocusApp {
         }
       }
     } catch { /* file:// or no listing */ }
-    const files = found.size ? [...found] : FocusApp.BUNDLED_BACKGROUND_FILES;   // 3. fallback
+    let files = [...found];
+    if (!files.length) {                           // 3. fallback: the bundled names, keeping only files that really exist
+      const checks = await Promise.all(FocusApp.BUNDLED_BACKGROUND_FILES.map(file => new Promise(resolve => {
+        const probe = new Image();
+        probe.onload = () => resolve(file);
+        probe.onerror = () => resolve(null);
+        probe.src = `images/${encodeURIComponent(file)}`;
+      })));
+      files = checks.filter(Boolean);
+    }
     files.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
     this.folderBackgrounds = files.map(file => this.folderBackground(file));
     await this.refreshBackgrounds();
@@ -1368,7 +1384,7 @@ class FocusApp {
     const wasSelected = this.selectedBackgroundImage === id;
     if (wasSelected) this.selectedBackgroundImage = null;
     await this.refreshBackgrounds();
-    if (wasSelected) this.setBackgroundImage(this.backgrounds[0].id);
+    if (wasSelected && this.backgrounds[0]) this.setBackgroundImage(this.backgrounds[0].id);
     this.showBackgroundUploadStatus("");
   }
 

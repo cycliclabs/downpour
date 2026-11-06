@@ -1,0 +1,4 @@
+{
+  "buildCommand": "python3 update-lists.py",
+  "outputDirectory": "."
+}
