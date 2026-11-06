@@ -5,11 +5,12 @@
    the existing design tokens, glass surfaces and component classes, and
    changes sizes, positions and wrapping, never the look.
 
-   Breakpoints
-     <= 1024px   tablet: tasks page becomes one column
-     <= 900px    hide the planner's centred date label
-     <= 768px    phone (also short landscape phones): bottom page selector,
-                 brain dump / music docked above it, settings full-screen
+   Layouts
+     tablet     <= 1024px   tasks page becomes one column
+     compact    phones, any orientation: one type scale, top bar, panels, forms
+     portrait   <= 768px wide, upright: bottom page selector, dock above it
+     landscape  short and wide (<= 500px tall): desktop-style top selector,
+                dock bottom-left, two-column tasks page
    ========================================================================== */
 
 @media (max-width: 1024px) {
@@ -26,18 +27,22 @@
 
 
 /* ==========================================================================
-   Phone
+   COMPACT: everything shared by phones in both orientations
    ========================================================================== */
-@media (max-width: 768px), (max-height: 500px) and (orientation: landscape) and (pointer: coarse) {
+@media (max-width: 768px), (max-height: 500px) and (orientation: landscape) {
 
     :root {
-        --m-pad: 16px;                                                    /* side gutter */
-        --m-top: calc(60px + env(safe-area-inset-top, 0px));              /* space the top bar takes */
-        --m-nav-h: 56px;                                                  /* bottom page selector */
-        --m-nav-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
-        --m-dock: calc(var(--m-nav-bottom) + var(--m-nav-h) + 12px);      /* bottom of the brain dump / music row */
-        --m-lower-top: calc(var(--m-dock) + 44px);                        /* top edge of that row */
-        --m-bottom: calc(var(--m-lower-top) + 12px);                      /* total space the focus page keeps free */
+        --m-pad: 16px;                                  /* side gutter */
+
+        /* Type scale. Every phone size comes from here, so nothing is out of proportion. */
+        --fs-body: 14px;
+        --fs-title: 15px;                               /* panel titles */
+        --fs-sheet: 17px;                               /* settings title */
+        --fs-h3: 13px;                                  /* section headings */
+        --fs-ui: 13px;                                  /* buttons, fields */
+        --fs-note: 12px;
+        --fs-small: 11px;
+        --fs-tiny: 10px;
     }
 
     /* ---- Page basics --------------------------------------------------- */
@@ -55,6 +60,7 @@
 
     body {
         min-height: 100dvh;
+        font-size: var(--fs-body);
         -webkit-text-size-adjust: 100%;
         -webkit-tap-highlight-color: transparent;
     }
@@ -63,20 +69,15 @@
         touch-action: manipulation;
     }
 
-    /* iOS zooms the page when a field under 16px gets focus. */
-    input.ui-field,
-    textarea.ui-field,
-    select.ui-control {
-        font-size: 16px;
+    .panel-title {
+        font-size: var(--fs-title);
     }
 
     .page-content {
         margin: var(--m-top) var(--m-pad) 0;
-        /* keep the last panel clear of the bottom page selector */
-        padding-bottom: calc(var(--m-nav-bottom) + var(--m-nav-h) + 20px);
     }
 
-    /* ---- Top bar: brand on the left, raindrops / streak / settings on the right ---- */
+    /* ---- Top bar: brand on the left; raindrops + streak joined in one pill, then settings ---- */
 
     .upper-bar {
         inset: calc(10px + env(safe-area-inset-top, 0px)) var(--m-pad) auto var(--m-pad);
@@ -84,9 +85,14 @@
     }
 
     .upper-bar-left h1 {
-        font-size: 20px;
-        letter-spacing: -.5px;
+        font-size: 19px;
+        font-weight: 700;
+        letter-spacing: -.4px;
         text-shadow: 0 1px 8px rgba(0, 0, 0, .6);
+    }
+
+    .upper-bar-right {
+        gap: 8px;
     }
 
     .upper-bar .ui-button {
@@ -96,57 +102,43 @@
         min-height: 38px;
     }
 
+    .stat-chips {
+        gap: 0;
+    }
+
     .stat-chip {
         height: 38px;
-        padding: 0 11px;
+        padding: 0 12px;
         gap: 6px;
-        font-size: 13px;
+        font-size: var(--fs-ui);
+    }
+
+    /* the two chips share one edge, like a segmented control */
+    .stat-raindrops {
+        border-radius: var(--radius) 0 0 var(--radius);
+        border-right-width: 0;
+    }
+
+    .stat-streak {
+        border-radius: 0 var(--radius) var(--radius) 0;
+    }
+
+    .stat-chip:hover {
+        transform: none;
     }
 
     .stat-popover {
         width: min(260px, calc(100vw - 2 * var(--m-pad)));
     }
 
-    /* ---- Page selector: a bottom tab bar (same glass pill, same active tile) ---- */
-
-    .page-selector {
-        position: fixed;
-        top: auto;
-        bottom: var(--m-nav-bottom);
-        left: 50%;
-        z-index: 31;
-        width: min(calc(100% - 2 * var(--m-pad)), 360px);
-        height: var(--m-nav-h);
-        gap: 4px;
-        padding: 5px;
-        transform: translateX(-50%);
-    }
+    /* ---- Page selector buttons (placement differs per orientation) ------- */
 
     .page-nav-button {
-        flex: 1 1 0;
-        min-width: 0;
-        height: 100%;
-        flex-direction: column;
-        justify-content: center;
-        gap: 3px;
-        padding: 0 4px;
-        border: 1px solid transparent;
-        font-size: 11px;
-        line-height: 1;
-    }
-
-    .page-nav-button span {
-        font-size: 11px;
-    }
-
-    .page-nav-button svg {
-        width: 20px;
-        height: 20px;
+        font-size: var(--fs-small);
     }
 
     .page-nav-button.is-active {
         color: var(--text);
-        border-color: rgba(255, 255, 255, .1);   /* same edge as .settings-nav-item.is-active */
     }
 
     /* ---- Focus page ----------------------------------------------------- */
@@ -158,19 +150,10 @@
 
     /* Scoped with :not(.is-pip): the PiP window copies this stylesheet and must keep its own sizing. */
     body:not(.is-pip) .center-stage {
-        --stage-ratio: 1.15;
-        --stage-max: 520px;
         --stage-reserved: calc(var(--m-top) + var(--m-bottom));
-        --u: 1.25cqw;                                  /* bigger unit: the 70-unit bar/clock fill ~88% of the stage */
-        --bar-h: calc(9.5 * var(--u));
-        --bar-font: calc(3.3 * var(--u));
         width: min(calc(100% - 2 * var(--m-pad)), var(--stage-max), calc((100vh - var(--stage-reserved)) * var(--stage-ratio)));
         width: min(calc(100% - 2 * var(--m-pad)), var(--stage-max), calc((100dvh - var(--stage-reserved)) * var(--stage-ratio)));
         translate: none;
-    }
-
-    body:not(.is-pip) .celebrate-display h2 {
-        font-size: 8.8em;                              /* same on-screen size as desktop, so it can't overflow */
     }
 
     /* The task list opens upward (like in PiP) so it never runs into the dock or the page selector. */
@@ -178,43 +161,28 @@
         --pop-shift: 10px;
         top: auto;
         bottom: calc(100% + 1em);
-        max-height: calc(46 * var(--u));
+        max-height: min(calc(46 * var(--u)), 50dvh);
     }
 
     .focus-tasks-content .category {
-        display: none;                                 /* no room for the extra label on a phone bar */
-    }
-
-    /* ---- Dock: brain dump on the left, music on the right, both above the page selector ---- */
-
-    .lower-bar {
-        inset: auto var(--m-pad) var(--m-dock) var(--m-pad);
-    }
-
-    .lower-bar-left {
-        display: contents;                             /* brain dump and music become the two ends of the bar */
-    }
-
-    /* Picture-in-picture (Document PiP) and element fullscreen don't work in mobile browsers. */
-    .lower-bar-right,
-    #pomodoroPipButton,
-    #fullscreenButton {
-        display: none;
+        display: none;                                  /* no room for the extra label on a phone bar */
     }
 
     /* Floating panels: bounded by the screen, never by a desktop pixel size. */
     .brain-dump-content {
         width: min(360px, calc(100vw - 2 * var(--m-pad)));
-        height: min(320px, calc(100dvh - var(--m-top) - var(--m-lower-top) - 24px));
+        height: min(320px, calc(100dvh - var(--m-top) - var(--m-lower-top) - 20px));
     }
 
     .music-content {
-        left: auto;
-        right: 0;                                      /* the music button is on the right now */
         width: min(600px, calc(100vw - 2 * var(--m-pad)));
-        height: min(560px, calc(100dvh - var(--m-top) - var(--m-lower-top) - 24px));
+        height: min(560px, calc(100dvh - var(--m-top) - var(--m-lower-top) - 20px));
         padding: 14px;
-        transform-origin: bottom right;
+    }
+
+    .music-header {
+        margin-bottom: 12px;
+        padding-bottom: 10px;
     }
 
     .music-tabs {
@@ -222,22 +190,15 @@
     }
 
     .music-tab {
-        font-size: 14px;
-    }
-
-    .music-grid {
-        grid-template-columns: repeat(3, 1fr);
-        gap: 8px;
-        padding: 4px 0;
-    }
-
-    .sound-btn {
-        padding: 12px 4px;
-        gap: 6px;
+        font-size: var(--fs-ui);
     }
 
     .sound-icon {
-        font-size: 26px;
+        font-size: 24px;
+    }
+
+    .sound-name {
+        font-size: var(--fs-tiny);
     }
 
     .spotify-embed-container {
@@ -252,10 +213,11 @@
 
     .task-planner {
         padding: 14px;
+        container-type: inline-size;                    /* the day cells adapt to the planner's width, not the screen's */
     }
 
-    .task-planner-heading p {
-        display: none;                                 /* "drag tasks onto a date" doesn't apply to touch */
+    .task-planner-heading h2 {
+        font-size: 16px;
     }
 
     .task-planner-navigation .ui-button {
@@ -265,37 +227,8 @@
         min-height: 36px;
     }
 
-    .task-planner-weekdays,
-    .task-planner-grid {
-        gap: 3px;
-    }
-
-    .task-planner-weekdays {
-        font-size: 10px;
-    }
-
     .task-planner-day {
-        min-height: 58px;
-        padding: 4px;
-        overflow: hidden;
-    }
-
-    .task-planner-day-select {
-        font-size: 11px;
-    }
-
-    .task-planner-items {
-        min-height: 0;
-        gap: 3px;
-        padding-top: 4px;
-    }
-
-    /* Names can't fit in a ~45px cell: show each task as a small category-coloured bar instead. */
-    .task-planner-item {
-        height: 6px;
-        padding: 0;
-        font-size: 0;
-        line-height: 0;
+        min-height: 84px;
     }
 
     .task-area {
@@ -326,6 +259,10 @@
         padding: 16px;
     }
 
+    .task-detail-name {
+        font-size: var(--fs-ui);
+    }
+
     /* ---- Analytics page ------------------------------------------------- */
 
     #focusActivity,
@@ -340,7 +277,101 @@
         min-height: 0;
     }
 
-    /* Title on its own line, controls wrap underneath instead of spilling out of the panel. */
+    .focus-total {
+        font-size: 26px;
+    }
+
+    .timeline-scroll {
+        min-height: 420px;
+    }
+
+    /* ---- Settings ------------------------------------------------------- */
+
+    .settings-header {
+        padding: calc(10px + env(safe-area-inset-top, 0px)) var(--m-pad) 10px;
+    }
+
+    .settings-header h2 {
+        font-size: var(--fs-sheet);
+    }
+
+    .settings-tab h3 {
+        font-size: var(--fs-h3);
+    }
+
+    .settings-nav-item {
+        font-size: 12.5px;
+    }
+
+    .settings-content {
+        padding: var(--m-pad);
+    }
+
+    .font-choice {
+        padding: 8px 10px;
+    }
+
+    .font-choice-sample {
+        font-size: 18px;
+    }
+
+    .font-choice-name {
+        font-size: var(--fs-tiny);
+    }
+
+    .pomodoro-settings label {
+        font-size: var(--fs-small);
+    }
+
+    /* ---- YouTube background --------------------------------------------- */
+
+    /* Make the frame taller than the screen so the player's title bar sits above the visible area. */
+    .bg-video iframe {
+        height: calc(max(100dvh, 56.25vw) + 200px);
+    }
+}
+
+/* Day cells too narrow for names: show each task as a small category-coloured bar. */
+@container (max-width: 520px) {
+    .task-planner-heading p {
+        display: none;                                  /* "drag tasks onto a date" doesn't apply to touch */
+    }
+
+    .task-planner-weekdays,
+    .task-planner-grid {
+        gap: 3px;
+    }
+
+    .task-planner-weekdays {
+        font-size: var(--fs-tiny);
+    }
+
+    .task-planner-day {
+        min-height: 58px;
+        padding: 4px;
+        overflow: hidden;
+    }
+
+    .task-planner-day-select {
+        font-size: var(--fs-small);
+    }
+
+    .task-planner-items {
+        min-height: 0;
+        gap: 3px;
+        padding-top: 4px;
+    }
+
+    .task-planner-item {
+        height: 6px;
+        padding: 0;
+        font-size: 0;
+        line-height: 0;
+    }
+}
+
+/* Title on its own line, controls wrap underneath instead of spilling out of the panel. */
+@media (max-width: 560px) {
     .activity-heading,
     .focus-trend-heading {
         flex-direction: column;
@@ -375,15 +406,132 @@
         left: 0;
         right: auto;
         width: 100%;
-        max-width: calc(100vw - 2 * var(--m-pad) - 32px);
     }
 
     .focus-trend-caption {
         margin-left: 0;
     }
+}
 
-    .timeline-scroll {
-        min-height: 420px;
+/* iOS Safari zooms the page when a field under 16px gets focus. Only iOS needs the bigger text,
+   so every other phone keeps the normal scale. */
+@supports (-webkit-touch-callout: none) {
+    @media (max-width: 768px), (max-height: 500px) and (orientation: landscape) {
+        input.ui-field,
+        textarea.ui-field,
+        select.ui-control {
+            font-size: 16px;
+        }
+    }
+}
+
+
+/* ==========================================================================
+   PORTRAIT: page selector along the bottom, brain dump / music docked above it
+   ========================================================================== */
+@media (max-width: 768px) and (orientation: portrait), (max-width: 768px) and (min-height: 501px) {
+
+    :root {
+        --m-top: calc(58px + env(safe-area-inset-top, 0px));              /* space the top bar takes */
+        --m-nav-h: 56px;                                                  /* bottom page selector */
+        --m-nav-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+        --m-dock: calc(var(--m-nav-bottom) + var(--m-nav-h) + 12px);      /* bottom of the brain dump / music row */
+        --m-lower-top: calc(var(--m-dock) + 44px);                        /* top edge of that row */
+        --m-bottom: calc(var(--m-lower-top) + 12px);                      /* total space the focus page keeps free */
+    }
+
+    .page-content {
+        /* keep the last panel clear of the bottom page selector */
+        padding-bottom: calc(var(--m-nav-bottom) + var(--m-nav-h) + 20px);
+    }
+
+    .upper-bar-left h1 {
+        font-size: 19px;
+    }
+
+    /* ---- Page selector: a bottom tab bar, exactly as wide as the dock above it ---- */
+
+    .page-selector {
+        position: fixed;
+        top: auto;
+        bottom: var(--m-nav-bottom);
+        left: var(--m-pad);
+        right: var(--m-pad);                            /* same insets as .lower-bar, so the edges line up */
+        z-index: 31;
+        width: auto;
+        height: var(--m-nav-h);
+        gap: 4px;
+        padding: 5px;
+        transform: none;
+    }
+
+    .page-nav-button {
+        flex: 1 1 0;
+        min-width: 0;
+        height: 100%;
+        flex-direction: column;
+        justify-content: center;
+        gap: 3px;
+        padding: 0 4px;
+        border: 1px solid transparent;
+        line-height: 1;
+    }
+
+    .page-nav-button svg {
+        width: 20px;
+        height: 20px;
+    }
+
+    .page-nav-button.is-active {
+        border-color: rgba(255, 255, 255, .1);          /* same edge as .settings-nav-item.is-active */
+    }
+
+    /* ---- Focus stage: bigger unit so the bar and clock fill most of the width ---- */
+
+    body:not(.is-pip) .center-stage {
+        --stage-ratio: 1.15;
+        --stage-max: 520px;
+        --u: 1.15cqw;
+        --bar-h: calc(9.5 * var(--u));
+        --bar-font: calc(3.4 * var(--u));
+    }
+
+    body:not(.is-pip) .celebrate-display h2 {
+        font-size: 9.5em;                               /* same on-screen size as desktop, so it can't overflow */
+    }
+
+    /* ---- Dock: brain dump on the left, music on the right ---------------- */
+
+    .lower-bar {
+        inset: auto var(--m-pad) var(--m-dock) var(--m-pad);
+    }
+
+    .lower-bar-left {
+        display: contents;                              /* brain dump and music become the two ends of the bar */
+    }
+
+    /* Picture-in-picture (Document PiP) and element fullscreen don't work in mobile browsers. */
+    .lower-bar-right,
+    #pomodoroPipButton,
+    #fullscreenButton {
+        display: none;
+    }
+
+    .music-content {
+        left: auto;
+        right: 0;                                       /* the music button is on the right now */
+        transform-origin: bottom right;
+    }
+
+    .music-grid {
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+        padding: 4px 0;
+    }
+
+    .sound-btn {
+        padding: 12px 4px;
+        gap: 6px;
     }
 
     /* ---- Settings: full-screen sheet, tabs along the top ---------------- */
@@ -393,10 +541,6 @@
         border-left: 0;
         border-radius: 0;
         box-shadow: none;
-    }
-
-    .settings-header {
-        padding: calc(12px + env(safe-area-inset-top, 0px)) var(--m-pad) 12px;
     }
 
     .settings-body {
@@ -424,7 +568,7 @@
     }
 
     .settings-content {
-        padding: var(--m-pad) var(--m-pad) calc(var(--m-pad) + env(safe-area-inset-bottom, 0px));
+        padding-bottom: calc(var(--m-pad) + env(safe-area-inset-bottom, 0px));
     }
 
     .pomodoro-settings {
@@ -438,20 +582,10 @@
     .account-form {
         max-width: none;
     }
-
-    /* ---- YouTube background --------------------------------------------- */
-
-    /* Make the frame taller than the screen so the player's title bar sits above the visible area. */
-    .bg-video iframe {
-        height: calc(max(100dvh, 56.25vw) + 200px);
-    }
 }
 
-
-/* ==========================================================================
-   Very narrow phones
-   ========================================================================== */
-@media (max-width: 340px) {
+/* Very narrow phones */
+@media (max-width: 340px) and (orientation: portrait) {
     .upper-bar-left {
         display: none;
     }
@@ -459,28 +593,103 @@
 
 
 /* ==========================================================================
-   Short landscape phones: nav, brain dump and music share one row
+   LANDSCAPE: short and wide. Desktop arrangement, sized for a phone:
+   page selector centred at the top, brain dump + music bottom-left.
    ========================================================================== */
-@media (max-height: 500px) and (orientation: landscape) and (pointer: coarse) {
+@media (max-height: 500px) and (orientation: landscape) {
 
     :root {
-        --m-top: calc(52px + env(safe-area-inset-top, 0px));
-        --m-nav-h: 44px;
-        --m-nav-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
-        --m-dock: var(--m-nav-bottom);                /* dock sits on the same row as the nav */
+        --m-pad: max(16px, env(safe-area-inset-left, 0px), env(safe-area-inset-right, 0px));
+        --m-top: calc(56px + env(safe-area-inset-top, 0px));
+        --m-dock: calc(12px + env(safe-area-inset-bottom, 0px));          /* bottom of the dock row */
+        --m-lower-top: calc(var(--m-dock) + 44px);
+        --m-bottom: calc(var(--m-lower-top) + 8px);
     }
 
+    .page-content {
+        padding-bottom: 16px;
+    }
+
+    /* ---- Page selector: the desktop pill, one row, a little smaller ----- */
+
     .page-selector {
-        width: min(calc(100% - 2 * (var(--m-pad) + 52px)), 340px);
+        height: 36px;
+        padding: 3px;
     }
 
     .page-nav-button {
-        flex-direction: row;
+        height: 28px;
         gap: 6px;
+        padding: 0 12px;
     }
 
-    body:not(.is-pip) .center-stage {
-        --stage-ratio: 2;
+    .page-nav-button svg {
+        width: 17px;
+        height: 17px;
+    }
+
+    .page-nav-button span {
+        font-size: 12px;
+    }
+
+    /* ---- Dock: both buttons bottom-left like desktop ---------------------- */
+
+    .lower-bar {
+        inset: auto var(--m-pad) var(--m-dock) var(--m-pad);
+    }
+
+    #pomodoroPipButton {
+        display: none;                                  /* Document PiP doesn't exist on phones */
+    }
+
+    .brain-dump-content,
+    .music-content {
+        padding-top: 12px;
+    }
+
+    .music-content {
+        left: 0;
+        width: min(600px, calc(100vw - 2 * var(--m-pad) - 47px));
+    }
+
+    /* ---- Tasks page: planner left, task list right, like desktop --------- */
+
+    #tasksPage:not([hidden]) {
+        grid-template-columns: minmax(0, 1fr) 300px;
+    }
+
+    /* ---- Settings: side panel with the sidebar, like desktop --------------- */
+
+    .settings-panel {
+        width: min(100%, 560px);
+    }
+
+    .settings-nav {
+        width: 150px;
+    }
+
+    .settings-content {
+        padding: 14px 16px;
+    }
+}
+
+/* Narrow landscape: only the open tab keeps its label so the selector never collides with the top bar. */
+@media (max-height: 500px) and (orientation: landscape) and (max-width: 720px) {
+    .page-nav-button {
+        padding: 0 10px;
+    }
+
+    .page-nav-button:not(.is-active) span {
+        display: none !important;
+    }
+}
+
+/* Element fullscreen works on Android Chrome but not on iOS Safari. */
+@supports (-webkit-touch-callout: none) {
+    @media (max-height: 500px) and (orientation: landscape) {
+        .lower-bar-right {
+            display: none;
+        }
     }
 }
 
