@@ -234,3 +234,56 @@
     color: var(--muted);
     font-size: 13px;
 }
+
+
+/* Background picker: tile wrapper so uploaded images can carry a delete button */
+.background-item {
+    position: relative;
+    display: flex;
+    min-width: 0;
+}
+
+.background-item .background-choice {
+    width: 100%;
+}
+
+.background-item .background-delete {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 26px;
+    height: 26px;
+    min-width: 26px;
+    min-height: 26px;
+    font-size: 17px;
+    line-height: 1;
+}
+
+/* "Add image" tile: same size as an image tile, dashed like .background-choice-no-image */
+.background-choice .background-add-art {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    border: 1px dashed var(--line);
+    border-radius: var(--radius);
+    background: var(--glass-inset);
+    color: var(--muted);
+    font-size: 28px;
+    line-height: 1;
+    transition: border-color .15s ease, color .15s ease;
+}
+
+.background-choice .background-add-art img {
+    width: 28px;
+    height: 28px;
+    aspect-ratio: auto;
+    object-fit: contain;
+    border-radius: 0;
+}
+
+.background-add:hover .background-add-art {
+    border-color: rgba(255, 255, 255, .5);
+    color: var(--text);
+}

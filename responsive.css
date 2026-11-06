@@ -1,11 +1,504 @@
+/* ==========================================================================
+   Responsive layer
+   --------------------------------------------------------------------------
+   MUST be linked LAST in index.html (after page-analytics.css). It only uses
+   the existing design tokens, glass surfaces and component classes, and
+   changes sizes, positions and wrapping, never the look.
+
+   Breakpoints
+     <= 1024px   tablet: tasks page becomes one column
+     <= 900px    hide the planner's centred date label
+     <= 768px    phone (also short landscape phones): bottom page selector,
+                 brain dump / music docked above it, settings full-screen
+   ========================================================================== */
+
 @media (max-width: 1024px) {
     #tasksPage:not([hidden]) {
-        grid-template-columns: 1fr;
+        grid-template-columns: minmax(0, 1fr);
     }
 }
 
 @media (max-width: 900px) {
     .task-planner-heading .task-selected-date {
         display: none;
+    }
+}
+
+
+/* ==========================================================================
+   Phone
+   ========================================================================== */
+@media (max-width: 768px), (max-height: 500px) and (orientation: landscape) and (pointer: coarse) {
+
+    :root {
+        --m-pad: 16px;                                                    /* side gutter */
+        --m-top: calc(60px + env(safe-area-inset-top, 0px));              /* space the top bar takes */
+        --m-nav-h: 56px;                                                  /* bottom page selector */
+        --m-nav-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+        --m-dock: calc(var(--m-nav-bottom) + var(--m-nav-h) + 12px);      /* bottom of the brain dump / music row */
+        --m-lower-top: calc(var(--m-dock) + 44px);                        /* top edge of that row */
+        --m-bottom: calc(var(--m-lower-top) + 12px);                      /* total space the focus page keeps free */
+    }
+
+    /* ---- Page basics --------------------------------------------------- */
+
+    /* The desktop css forces a horizontal scrollbar on <html>; on a phone that is a sideways wobble. */
+    html {
+        overflow-x: hidden;
+        overflow-y: auto;
+    }
+
+    /* The focus page is one fixed screen: nothing to scroll or rubber-band. */
+    html:has(body[data-page="focus"]) {
+        overflow: hidden;
+    }
+
+    body {
+        min-height: 100dvh;
+        -webkit-text-size-adjust: 100%;
+        -webkit-tap-highlight-color: transparent;
+    }
+
+    button {
+        touch-action: manipulation;
+    }
+
+    /* iOS zooms the page when a field under 16px gets focus. */
+    input.ui-field,
+    textarea.ui-field,
+    select.ui-control {
+        font-size: 16px;
+    }
+
+    .page-content {
+        margin: var(--m-top) var(--m-pad) 0;
+        /* keep the last panel clear of the bottom page selector */
+        padding-bottom: calc(var(--m-nav-bottom) + var(--m-nav-h) + 20px);
+    }
+
+    /* ---- Top bar: brand on the left, raindrops / streak / settings on the right ---- */
+
+    .upper-bar {
+        inset: calc(10px + env(safe-area-inset-top, 0px)) var(--m-pad) auto var(--m-pad);
+        min-height: 38px;
+    }
+
+    .upper-bar-left h1 {
+        font-size: 20px;
+        letter-spacing: -.5px;
+        text-shadow: 0 1px 8px rgba(0, 0, 0, .6);
+    }
+
+    .upper-bar .ui-button {
+        width: 38px;
+        height: 38px;
+        min-width: 38px;
+        min-height: 38px;
+    }
+
+    .stat-chip {
+        height: 38px;
+        padding: 0 11px;
+        gap: 6px;
+        font-size: 13px;
+    }
+
+    .stat-popover {
+        width: min(260px, calc(100vw - 2 * var(--m-pad)));
+    }
+
+    /* ---- Page selector: a bottom tab bar (same glass pill, same active tile) ---- */
+
+    .page-selector {
+        position: fixed;
+        top: auto;
+        bottom: var(--m-nav-bottom);
+        left: 50%;
+        z-index: 31;
+        width: min(calc(100% - 2 * var(--m-pad)), 360px);
+        height: var(--m-nav-h);
+        gap: 4px;
+        padding: 5px;
+        transform: translateX(-50%);
+    }
+
+    .page-nav-button {
+        flex: 1 1 0;
+        min-width: 0;
+        height: 100%;
+        flex-direction: column;
+        justify-content: center;
+        gap: 3px;
+        padding: 0 4px;
+        border: 1px solid transparent;
+        font-size: 11px;
+        line-height: 1;
+    }
+
+    .page-nav-button span {
+        font-size: 11px;
+    }
+
+    .page-nav-button svg {
+        width: 20px;
+        height: 20px;
+    }
+
+    .page-nav-button.is-active {
+        color: var(--text);
+        border-color: rgba(255, 255, 255, .1);   /* same edge as .settings-nav-item.is-active */
+    }
+
+    /* ---- Focus page ----------------------------------------------------- */
+
+    /* Centre the stage in the free area between the top bar and the dock instead of the whole screen. */
+    .focus-page:not([hidden]) {
+        inset: var(--m-top) 0 var(--m-bottom) 0;
+    }
+
+    /* Scoped with :not(.is-pip): the PiP window copies this stylesheet and must keep its own sizing. */
+    body:not(.is-pip) .center-stage {
+        --stage-ratio: 1.15;
+        --stage-max: 520px;
+        --stage-reserved: calc(var(--m-top) + var(--m-bottom));
+        --u: 1.25cqw;                                  /* bigger unit: the 70-unit bar/clock fill ~88% of the stage */
+        --bar-h: calc(9.5 * var(--u));
+        --bar-font: calc(3.3 * var(--u));
+        width: min(calc(100% - 2 * var(--m-pad)), var(--stage-max), calc((100vh - var(--stage-reserved)) * var(--stage-ratio)));
+        width: min(calc(100% - 2 * var(--m-pad)), var(--stage-max), calc((100dvh - var(--stage-reserved)) * var(--stage-ratio)));
+        translate: none;
+    }
+
+    body:not(.is-pip) .celebrate-display h2 {
+        font-size: 8.8em;                              /* same on-screen size as desktop, so it can't overflow */
+    }
+
+    /* The task list opens upward (like in PiP) so it never runs into the dock or the page selector. */
+    body:not(.is-pip) .focus-tasks-content {
+        --pop-shift: 10px;
+        top: auto;
+        bottom: calc(100% + 1em);
+        max-height: calc(46 * var(--u));
+    }
+
+    .focus-tasks-content .category {
+        display: none;                                 /* no room for the extra label on a phone bar */
+    }
+
+    /* ---- Dock: brain dump on the left, music on the right, both above the page selector ---- */
+
+    .lower-bar {
+        inset: auto var(--m-pad) var(--m-dock) var(--m-pad);
+    }
+
+    .lower-bar-left {
+        display: contents;                             /* brain dump and music become the two ends of the bar */
+    }
+
+    /* Picture-in-picture (Document PiP) and element fullscreen don't work in mobile browsers. */
+    .lower-bar-right,
+    #pomodoroPipButton,
+    #fullscreenButton {
+        display: none;
+    }
+
+    /* Floating panels: bounded by the screen, never by a desktop pixel size. */
+    .brain-dump-content {
+        width: min(360px, calc(100vw - 2 * var(--m-pad)));
+        height: min(320px, calc(100dvh - var(--m-top) - var(--m-lower-top) - 24px));
+    }
+
+    .music-content {
+        left: auto;
+        right: 0;                                      /* the music button is on the right now */
+        width: min(600px, calc(100vw - 2 * var(--m-pad)));
+        height: min(560px, calc(100dvh - var(--m-top) - var(--m-lower-top) - 24px));
+        padding: 14px;
+        transform-origin: bottom right;
+    }
+
+    .music-tabs {
+        gap: 14px;
+    }
+
+    .music-tab {
+        font-size: 14px;
+    }
+
+    .music-grid {
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+        padding: 4px 0;
+    }
+
+    .sound-btn {
+        padding: 12px 4px;
+        gap: 6px;
+    }
+
+    .sound-icon {
+        font-size: 26px;
+    }
+
+    .spotify-embed-container {
+        min-height: 300px;
+    }
+
+    /* ---- Tasks page ----------------------------------------------------- */
+
+    #tasksPage:not([hidden]) {
+        gap: 14px;
+    }
+
+    .task-planner {
+        padding: 14px;
+    }
+
+    .task-planner-heading p {
+        display: none;                                 /* "drag tasks onto a date" doesn't apply to touch */
+    }
+
+    .task-planner-navigation .ui-button {
+        width: 36px;
+        height: 36px;
+        min-width: 36px;
+        min-height: 36px;
+    }
+
+    .task-planner-weekdays,
+    .task-planner-grid {
+        gap: 3px;
+    }
+
+    .task-planner-weekdays {
+        font-size: 10px;
+    }
+
+    .task-planner-day {
+        min-height: 58px;
+        padding: 4px;
+        overflow: hidden;
+    }
+
+    .task-planner-day-select {
+        font-size: 11px;
+    }
+
+    .task-planner-items {
+        min-height: 0;
+        gap: 3px;
+        padding-top: 4px;
+    }
+
+    /* Names can't fit in a ~45px cell: show each task as a small category-coloured bar instead. */
+    .task-planner-item {
+        height: 6px;
+        padding: 0;
+        font-size: 0;
+        line-height: 0;
+    }
+
+    .task-area {
+        padding: 16px;
+    }
+
+    .task-filters {
+        flex-wrap: wrap;
+    }
+
+    .task-row {
+        width: 100%;
+    }
+
+    .task-actions .ui-button {
+        width: 30px;
+        height: 30px;
+        min-width: 30px;
+        min-height: 30px;
+    }
+
+    .task-modal {
+        padding: 12px;
+    }
+
+    .task-details {
+        max-height: calc(100dvh - 24px);
+        padding: 16px;
+    }
+
+    /* ---- Analytics page ------------------------------------------------- */
+
+    #focusActivity,
+    .focus-trend,
+    #focusSummary,
+    #analyticsWidgets > .panel {
+        padding: 16px;
+    }
+
+    #focusActivity,
+    .focus-trend {
+        min-height: 0;
+    }
+
+    /* Title on its own line, controls wrap underneath instead of spilling out of the panel. */
+    .activity-heading,
+    .focus-trend-heading {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 10px;
+    }
+
+    .activity-heading > div,
+    .focus-trend-heading > div {
+        flex-wrap: wrap;
+    }
+
+    .activity-year-control,
+    .focus-trend-control,
+    .trend-multi-select {
+        flex: 1 1 140px;
+        min-width: 0;
+    }
+
+    .activity-year-control select,
+    .focus-trend-control select {
+        flex: 1;
+        min-width: 0;
+    }
+
+    .trend-multi-btn {
+        width: 100%;
+        justify-content: flex-start;
+    }
+
+    .trend-multi-content {
+        left: 0;
+        right: auto;
+        width: 100%;
+        max-width: calc(100vw - 2 * var(--m-pad) - 32px);
+    }
+
+    .focus-trend-caption {
+        margin-left: 0;
+    }
+
+    .timeline-scroll {
+        min-height: 420px;
+    }
+
+    /* ---- Settings: full-screen sheet, tabs along the top ---------------- */
+
+    .settings-panel {
+        width: 100%;
+        border-left: 0;
+        border-radius: 0;
+        box-shadow: none;
+    }
+
+    .settings-header {
+        padding: calc(12px + env(safe-area-inset-top, 0px)) var(--m-pad) 12px;
+    }
+
+    .settings-body {
+        flex-direction: column;
+    }
+
+    .settings-nav {
+        flex: none;
+        width: auto;
+        flex-direction: row;
+        gap: 6px;
+        padding: 8px var(--m-pad);
+        overflow-x: auto;
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+    }
+
+    .settings-nav-item {
+        flex: none;
+        white-space: nowrap;
+    }
+
+    .settings-nav-bottom {
+        margin-top: 0;
+    }
+
+    .settings-content {
+        padding: var(--m-pad) var(--m-pad) calc(var(--m-pad) + env(safe-area-inset-bottom, 0px));
+    }
+
+    .pomodoro-settings {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .pomodoro-settings .ui-control {
+        grid-column: 1 / -1;
+    }
+
+    .account-form {
+        max-width: none;
+    }
+
+    /* ---- YouTube background --------------------------------------------- */
+
+    /* Make the frame taller than the screen so the player's title bar sits above the visible area. */
+    .bg-video iframe {
+        height: calc(max(100dvh, 56.25vw) + 200px);
+    }
+}
+
+
+/* ==========================================================================
+   Very narrow phones
+   ========================================================================== */
+@media (max-width: 340px) {
+    .upper-bar-left {
+        display: none;
+    }
+}
+
+
+/* ==========================================================================
+   Short landscape phones: nav, brain dump and music share one row
+   ========================================================================== */
+@media (max-height: 500px) and (orientation: landscape) and (pointer: coarse) {
+
+    :root {
+        --m-top: calc(52px + env(safe-area-inset-top, 0px));
+        --m-nav-h: 44px;
+        --m-nav-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+        --m-dock: var(--m-nav-bottom);                /* dock sits on the same row as the nav */
+    }
+
+    .page-selector {
+        width: min(calc(100% - 2 * (var(--m-pad) + 52px)), 340px);
+    }
+
+    .page-nav-button {
+        flex-direction: row;
+        gap: 6px;
+    }
+
+    body:not(.is-pip) .center-stage {
+        --stage-ratio: 2;
+    }
+}
+
+
+/* ==========================================================================
+   Touch: no sticky hover lift / glow after a tap
+   ========================================================================== */
+@media (hover: none) {
+    :is(.ui-button, .ui-control, .page-nav-button, .sound-btn, .music-tab, .font-choice, .background-choice, .brain-dump-close):hover {
+        transform: none;
+    }
+
+    :is(.ui-button, .ui-control):hover {
+        border-color: var(--glass-border);
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06), 0 3px 10px rgba(0, 0, 0, .1);
+    }
+
+    :is(.ui-button, .ui-control):active {
+        border-color: rgba(255, 255, 255, .5);
     }
 }

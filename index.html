@@ -2,14 +2,14 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Downpour</title>
   <link rel="stylesheet" href="settings.css">
   <link rel="stylesheet" href="common.css">
-  <link rel="stylesheet" href="responsive.css">
   <link rel="stylesheet" href="page-focus.css">
   <link rel="stylesheet" href="page-tasksandsomefocus.css">
   <link rel="stylesheet" href="page-analytics.css">
+  <link rel="stylesheet" href="responsive.css"> <!-- keep LAST so it can override the page css -->
 </head>
 
 
@@ -416,6 +416,9 @@
           
           <h3>Static</h3>
           <div class="background-choices" id="backgroundChoices" role="group" aria-label="Choose background image"></div>
+
+          <input type="file" id="backgroundUploadInput" accept="image/*" hidden>
+          <p class="settings-note" id="backgroundUploadStatus" aria-live="polite"></p>
 
           <h3 style="margin-top: 24px;">Animated</h3>
           <p style="font-size: 13px; color: var(--muted); margin: 0 0 12px;">Coming soon...</p>

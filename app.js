@@ -61,12 +61,22 @@ class FocusStore {
 }
 
 class FocusApp {
-  static BACKGROUNDS = ["images/bg.jpg", "images/bg2.jpg", "images/bg3.jpg", "images/bg4.jpg", "images/bg5.jpg"];
-  // Clock fonts. Every font file becomes a choice in settings; the family name, weight and
-  // variable-ness are read from the file name (see parseFontFile). Files come from two places:
-  //   1. BUNDLED_FONT_FILES: files in ./fonts that you list here (always works, even from file://)
-  //   2. anything else in ./fonts, when the page is served over http(s) with directory listing
-  //      (e.g. `python -m http.server`, VS Code Live Server)
+  // Backgrounds. Every image in ./images becomes a choice in settings, named after its file
+  // (extension removed). Files come from three places, in this order of preference:
+  //   1. images/backgrounds.json, written by update-backgrounds.py (works on any host)
+  //   2. the folder listing, when served with one (`python -m http.server`, VS Code Live Server)
+  //   3. BUNDLED_BACKGROUND_FILES below (fallback, e.g. file://)
+  // Images uploaded in settings are stored in this browser (IndexedDB) and listed after them.
+  static BUNDLED_BACKGROUND_FILES = ["bg.jpg", "bg2.jpg", "bg3.jpg", "bg4.jpg", "bg5.jpg"];
+  static BACKGROUND_EXT = /\.(?:jpe?g|png|webp|avif|gif)$/i;
+  static BACKGROUND_DB = "focus-backgrounds";
+  // Clock fonts. Every font file in ./fonts becomes a choice in settings, named after its file
+  // (extension removed; "-Bold", "-Regular", "-VariableFont_wght" and similar endings are dropped
+  // so the weights of one family group together). Files come from three places:
+  //   1. fonts/fonts.json, written by update-lists.py (works on any host)
+  //   2. the folder listing, when served with one (`python -m http.server`, VS Code Live Server)
+  //   3. BUNDLED_FONT_FILES below (fallback, e.g. file://)
+  static FONT_EXT = /\.(?:ttf|otf|woff2?)$/i;
   static BUNDLED_FONT_FILES = [
     "Jost-VariableFont_wght.ttf",
     "Audiowide-Regular.ttf",
@@ -111,13 +121,22 @@ class FocusApp {
     this.etaPrompt = null;
     this.celebrationTimer = null;
     this.elements = this.getElements();
+    this.folderBackgrounds = FocusApp.BUNDLED_BACKGROUND_FILES.map(name => this.folderBackground(name));
+    this.backgrounds = [...this.folderBackgrounds];
+    this.customBackgroundUrls = new Map();
     this.renderBackgroundChoices();
     this.selectedActivityCategory = "all";
     this.selectedTrendCategories = [];
     this.selectedCategory = "all";
     this.hideCompleted = false;
     const savedBackground = localStorage.getItem("focus-background-image");
-    this.setBackgroundImage(FocusApp.BACKGROUNDS.includes(savedBackground) ? savedBackground : FocusApp.BACKGROUNDS[0], false);
+    if (savedBackground?.startsWith("images/") && !this.backgrounds.some(bg => bg.id === savedBackground)) {
+      this.backgrounds.push(this.folderBackground(savedBackground.slice("images/".length)));   // apply at once; the folder scan below confirms it
+    }
+    if (!savedBackground?.startsWith("custom:")) {
+      this.setBackgroundImage(this.backgrounds.some(bg => bg.id === savedBackground) ? savedBackground : this.backgrounds[0].id, false);
+    }
+    this.loadBackgrounds();                        // finds the folder's images and the uploaded ones, then re-applies the choice
     const savedVideo = localStorage.getItem("focus-background-video");
     if (savedVideo) this.setBackgroundVideo(savedVideo, false);
     this.clockFonts = new Map();
@@ -193,6 +212,8 @@ class FocusApp {
       focusNowTask: query("#focusNowTask"),
       timeLine: query("#timeLine"),
       backgroundChoices: query("#backgroundChoices"),
+      backgroundUploadInput: query("#backgroundUploadInput"),
+      backgroundUploadStatus: query("#backgroundUploadStatus"),
       newCategoryName: query("#newCategoryName"),
       analyticsWidgets: query("#analyticsWidgets"),
       backgroundVideoUrl: query("#backgroundVideoUrl"),
@@ -333,7 +354,11 @@ class FocusApp {
       const choice = event.target.closest("[data-font]");
       if (choice) this.setClockFont(choice.dataset.font);
     };
+    this.elements.backgroundUploadInput.onchange = () => this.addCustomBackground();
     this.elements.backgroundChoices.onclick = event => {
+      if (event.target.closest("[data-background-add]")) return this.elements.backgroundUploadInput.click();
+      const remove = event.target.closest("[data-background-delete]");
+      if (remove) return this.deleteCustomBackground(remove.dataset.backgroundDelete);
       const choice = event.target.closest("[data-background]");
       if (!choice) return;
       this.setBackgroundVideo(null);              // one background at a time: a picture replaces the video
@@ -1097,9 +1122,10 @@ class FocusApp {
   }
 
   setBackgroundImage(image, persist = true) {
-    if (!FocusApp.BACKGROUNDS.includes(image)) return;
+    const background = this.backgrounds.find(bg => bg.id === image);
+    if (!background) return;
     this.selectedBackgroundImage = image;
-    this.document.body.style.backgroundImage = image === "none" ? "none" : `url("${image}")`;
+    this.document.body.style.backgroundImage = `url("${background.src}")`;
     this.elements.backgroundChoices.querySelectorAll("[data-background]").forEach(choice => {
       const selected = choice.dataset.background === image;
       choice.classList.toggle("is-active", selected);
@@ -1110,34 +1136,49 @@ class FocusApp {
 
 
   // ---- Clock fonts ------------------------------------------------------------
-  // "Jost-VariableFont_wght.ttf" -> Jost (variable); "Unkempt-Bold.ttf" -> Unkempt 700;
-  // "NationalPark-Regular.otf" -> National Park 400.
+  // The name is the file name: "My Cool Font.ttf" -> My Cool Font. Style endings are only used to
+  // pick the weight and to group files of one family: "Jost-VariableFont_wght.ttf" -> Jost (variable),
+  // "Unkempt-Bold.ttf" -> Unkempt 700.
   parseFontFile(name) {
     const base = name.replace(/\.[^.]+$/, "");
     const variable = /variable|\[.*wght.*\]/i.test(base);
-    const [rawFamily, ...rest] = base.split(/[-_]/);
-    const family = rawFamily.replace(/([a-z])([A-Z])/g, "$1 $2").trim();
-    const style = rest.join(" ").toLowerCase();
-    const weights = [["thin", 100], ["extralight", 200], ["ultralight", 200], ["semibold", 600], ["demibold", 600],
-      ["extrabold", 800], ["ultrabold", 800], ["light", 300], ["medium", 500], ["bold", 700], ["black", 900], ["heavy", 900]];
-    const weight = variable ? 400 : (weights.find(([word]) => style.includes(word))?.[1] ?? 400);
-    return { family, weight, variable, italic: /italic|oblique/.test(style) };
+    let family = base.replace(/\[[^\]]*\]/g, "").replace(/[-_ ]*variable(?:[-_ ]?font)?(?:[-_ ]\w+)*$/i, "");
+    const styleWords = "thin|extralight|ultralight|light|regular|medium|semibold|demibold|bold|extrabold|ultrabold|black|heavy|italic|oblique";
+    const ending = new RegExp(`[-_ ]+(${styleWords})$`, "i");
+    const style = [];
+    for (let match = family.match(ending); match && family.length > match[0].length; match = family.match(ending)) {
+      style.unshift(match[1].toLowerCase());
+      family = family.slice(0, -match[0].length);
+    }
+    family = family.replace(/[-_]+/g, " ").replace(/["'\\]/g, "").replace(/\s+/g, " ").trim() || base;
+    const weights = { thin: 100, extralight: 200, ultralight: 200, light: 300, regular: 400, medium: 500, semibold: 600,
+      demibold: 600, bold: 700, extrabold: 800, ultrabold: 800, black: 900, heavy: 900 };
+    const weight = variable ? 400 : (style.map(word => weights[word]).find(Boolean) ?? 400);
+    return { family, weight, variable, italic: style.some(word => word === "italic" || word === "oblique") };
   }
 
   async loadClockFonts() {
-    const files = new Map();                       // file name -> src
-    const add = (name, src) => { if (!files.has(name)) files.set(name, src); };
-    FocusApp.BUNDLED_FONT_FILES.forEach(name => add(name, new URL(`fonts/${name}`, location.href).href));
-    try {                                          // only works when served with a directory listing
+    const found = new Set();
+    const add = name => {
+      const file = String(name).split(/[\\/]/).pop();
+      if (file && !file.startsWith(".") && FocusApp.FONT_EXT.test(file)) found.add(file);
+    };
+    try {                                          // 1. manifest from update-lists.py
+      const response = await fetch("fonts/fonts.json", { cache: "no-cache" });
+      if (response.ok) (await response.json()).forEach(add);
+    } catch { /* no manifest */ }
+    try {                                          // 2. folder listing (dev servers)
       const response = await fetch("fonts/");
       if (response.ok) {
         const html = await response.text();
-        for (const match of html.matchAll(/href="([^"]+\.(?:ttf|otf|woff2?))"/gi)) {
-          const name = decodeURIComponent(match[1]).split(/[\\/]/).pop();
-          add(name, new URL(`fonts/${encodeURIComponent(name)}`, location.href).href);
+        for (const match of html.matchAll(/href="([^"?#]+)"/gi)) {
+          try { add(decodeURIComponent(match[1])); } catch { /* bad escape */ }
         }
       }
-    } catch { /* file:// or no listing: bundled + added fonts only */ }
+    } catch { /* file:// or no listing */ }
+    const names = found.size ? [...found] : FocusApp.BUNDLED_FONT_FILES;   // 3. fallback
+    names.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
+    const files = new Map(names.map(name => [name, new URL(`fonts/${encodeURIComponent(name)}`, location.href).href]));
 
     this.clockFonts = new Map();
     files.forEach((src, name) => {
@@ -1196,9 +1237,139 @@ class FocusApp {
   }
 
   renderBackgroundChoices() {
-    this.elements.backgroundChoices.innerHTML = FocusApp.BACKGROUNDS.map(image =>
-      `<button class="background-choice" type="button" data-background="${this.escape(image)}" aria-pressed="false"><img src="${this.escape(image)}" alt=""><span>${this.escape(image)}</span></button>`
-    ).join("");
+    const esc = value => this.escape(value);
+    this.elements.backgroundChoices.innerHTML = this.backgrounds.map(bg =>
+      `<div class="background-item"><button class="background-choice" type="button" data-background="${esc(bg.id)}" aria-pressed="false" title="${esc(bg.name)}"><img src="${esc(bg.src)}" alt="" loading="lazy"><span>${esc(bg.name)}</span></button>` +
+      (bg.custom ? `<button class="ui-button background-delete" type="button" data-background-delete="${esc(bg.id)}" aria-label="Delete ${esc(bg.name)}" title="Delete">×</button>` : "") +
+      `</div>`
+    ).join("") +
+    `<div class="background-item"><button class="background-choice background-add" type="button" data-background-add title="Upload your own image"><span class="background-add-art"><img src="icons/image-plus.svg" alt="" onerror="this.replaceWith(document.createTextNode('+'))"></span><span>Add image</span></button></div>`;
+  }
+
+  // ---- Background library (./images + uploads) ----------------------------------------------
+  folderBackground(file) {
+    return { id: `images/${file}`, src: `images/${encodeURIComponent(file)}`, name: file.replace(/\.[^.]+$/, "") };
+  }
+
+  async loadBackgrounds() {
+    const found = new Set();
+    const add = name => {
+      const file = String(name).split(/[\\/]/).pop();
+      if (file && !file.startsWith(".") && FocusApp.BACKGROUND_EXT.test(file)) found.add(file);
+    };
+    try {                                          // 1. manifest from update-backgrounds.py
+      const response = await fetch("images/backgrounds.json", { cache: "no-cache" });
+      if (response.ok) (await response.json()).forEach(add);
+    } catch { /* no manifest */ }
+    try {                                          // 2. folder listing (dev servers)
+      const response = await fetch("images/");
+      if (response.ok) {
+        const html = await response.text();
+        for (const match of html.matchAll(/href="([^"?#]+)"/gi)) {
+          try { add(decodeURIComponent(match[1])); } catch { /* bad escape */ }
+        }
+      }
+    } catch { /* file:// or no listing */ }
+    const files = found.size ? [...found] : FocusApp.BUNDLED_BACKGROUND_FILES;   // 3. fallback
+    files.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }));
+    this.folderBackgrounds = files.map(file => this.folderBackground(file));
+    await this.refreshBackgrounds();
+  }
+
+  async refreshBackgrounds() {
+    this.backgrounds = [...this.folderBackgrounds, ...await this.loadCustomBackgrounds()];
+    this.renderBackgroundChoices();
+    const saved = localStorage.getItem("focus-background-image");
+    const wanted = [this.selectedBackgroundImage, saved].find(id => this.backgrounds.some(bg => bg.id === id)) ?? this.backgrounds[0]?.id;
+    if (wanted) this.setBackgroundImage(wanted, false);
+  }
+
+  showBackgroundUploadStatus(message, isError = false) {
+    const status = this.elements.backgroundUploadStatus;
+    status.textContent = message;
+    status.classList.toggle("is-error", isError);
+  }
+
+  // Uploaded images live in IndexedDB on this device (localStorage is too small for pictures).
+  backgroundDb() {
+    this.backgroundDbPromise ||= new Promise((resolve, reject) => {
+      const request = indexedDB.open(FocusApp.BACKGROUND_DB, 1);
+      request.onupgradeneeded = () => request.result.createObjectStore("images", { keyPath: "id" });
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    return this.backgroundDbPromise;
+  }
+
+  async backgroundStore(mode, run) {
+    const db = await this.backgroundDb();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction("images", mode);
+      const request = run(transaction.objectStore("images"));
+      transaction.oncomplete = () => resolve(request.result);
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+  }
+
+  async loadCustomBackgrounds() {
+    try {
+      const rows = await this.backgroundStore("readonly", store => store.getAll());
+      return rows.sort((a, b) => a.added - b.added).map(row => {
+        if (!this.customBackgroundUrls.has(row.id)) this.customBackgroundUrls.set(row.id, URL.createObjectURL(row.blob));
+        return { id: `custom:${row.id}`, src: this.customBackgroundUrls.get(row.id), name: row.name, custom: true };
+      });
+    } catch { return []; }                         // storage blocked (e.g. private mode)
+  }
+
+  // Big photos are shrunk to at most 2560px so they stay light and load fast.
+  async downscaleImage(file, max = 2560) {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, max / Math.max(bitmap.width, bitmap.height));
+    if (scale === 1 && file.size < 4 * 1024 * 1024) { bitmap.close?.(); return file; }
+    const canvas = this.document.createElement("canvas");
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    canvas.getContext("2d").drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close?.();
+    return new Promise((resolve, reject) =>
+      canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error("Couldn't process that image.")), "image/jpeg", 0.88));
+  }
+
+  async addCustomBackground() {
+    const input = this.elements.backgroundUploadInput;
+    const file = input.files?.[0];
+    input.value = "";
+    if (!file) return;
+    if (!file.type.startsWith("image/")) return this.showBackgroundUploadStatus("That isn't an image file.", true);
+    const name = file.name.replace(/\.[^.]+$/, "");
+    try {
+      const blob = await this.downscaleImage(file);
+      const id = crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
+      await this.backgroundStore("readwrite", store => store.put({ id, name, blob, added: Date.now() }));
+      await this.refreshBackgrounds();
+      this.setBackgroundVideo(null);
+      this.setBackgroundImage(`custom:${id}`);
+      this.showBackgroundUploadStatus(`Added "${name}". It is saved on this device only.`);
+    } catch (error) {
+      this.showBackgroundUploadStatus(error?.message || "Couldn't save that image.", true);
+    }
+  }
+
+  async deleteCustomBackground(id) {
+    const background = this.backgrounds.find(bg => bg.id === id);
+    if (!background || !confirm(`Delete "${background.name}"?`)) return;
+    const rawId = id.slice("custom:".length);
+    try {
+      await this.backgroundStore("readwrite", store => store.delete(rawId));
+    } catch { return this.showBackgroundUploadStatus("Couldn't delete that image.", true); }
+    URL.revokeObjectURL(this.customBackgroundUrls.get(rawId));
+    this.customBackgroundUrls.delete(rawId);
+    const wasSelected = this.selectedBackgroundImage === id;
+    if (wasSelected) this.selectedBackgroundImage = null;
+    await this.refreshBackgrounds();
+    if (wasSelected) this.setBackgroundImage(this.backgrounds[0].id);
+    this.showBackgroundUploadStatus("");
   }
 
   renderCategoryFilter() {

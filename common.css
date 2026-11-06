@@ -407,7 +407,7 @@ body::before {
 
 .background-choices {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr)); /* CHANGED FROM 3 TO 2 */
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); /* as many small tiles per row as fit */
     gap: 6px;
 }
 

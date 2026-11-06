@@ -283,7 +283,11 @@ body.is-pip .center-stage {
     text-box: trim-both cap alphabetic;
     white-space: nowrap;
     color: #fff;
-    text-shadow: 0 .03em .06em rgba(0, 0, 0, 0.8);
+    /* tight edge + wide soft drop + faint dark halo: readable on bright and busy backgrounds */
+    text-shadow:
+        0 .03em .06em rgba(0, 0, 0, 0.9),
+        0 .08em .2em rgba(0, 0, 0, 0.7),
+        0 0 .5em rgba(0, 0, 0, 0.5);
     cursor: pointer;
 }
 
