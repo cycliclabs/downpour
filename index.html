@@ -211,7 +211,7 @@
 
               <!-- Ambient Sounds Tab -->
               <div class="music-tab-content" id="tab-ambient">
-                <div class="music-grid" id="ambientGrid">
+                <div class="music-grid" id="ambientGrid" inert aria-hidden="true">
                   <button class="sound-btn" data-sound="rain"><span class="sound-icon">🌧️</span><span class="sound-name">Rain</span></button>
                   <button class="sound-btn" data-sound="ocean"><span class="sound-icon">🌊</span><span class="sound-name">Ocean</span></button>
                   <button class="sound-btn" data-sound="cafe"><span class="sound-icon">☕</span><span class="sound-name">Bustling Café</span></button>
@@ -224,6 +224,11 @@
                   <button class="sound-btn" data-sound="wind"><span class="sound-icon">💨</span><span class="sound-name">Wind</span></button>
                   <button class="sound-btn" data-sound="white-noise"><span class="sound-icon">📻</span><span class="sound-name">White Noise</span></button>
                   <button class="sound-btn" data-sound="pink-noise"><span class="sound-icon">🌸</span><span class="sound-name">Pink Noise</span></button>
+                </div>
+                <div class="music-soon">
+                  <span class="music-soon-badge">Coming soon</span>
+                  <p>Ambient sounds are on the way. In the meantime, bring your own: paste a Spotify playlist in My Playlists.</p>
+                  <button class="ui-control" id="ambientGoPlaylists" type="button">Go to My Playlists</button>
                 </div>
               </div>
 

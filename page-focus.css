@@ -987,3 +987,46 @@ body.is-pip .focus-add-task-btn {
     width: 100%;
     height: 100%;
 }
+
+/* Ambient sounds are not available yet: the grid is dimmed under a "coming soon" note */
+#tab-ambient {
+    position: relative;
+}
+
+#tab-ambient .music-grid {
+    opacity: .25;
+    pointer-events: none;
+    user-select: none;
+}
+
+.music-soon {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    padding: 24px;
+    text-align: center;
+}
+
+.music-soon-badge {
+    padding: 5px 14px;
+    border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    color: var(--accent);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+
+.music-soon p {
+    max-width: 320px;
+    margin: 0;
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.5;
+}

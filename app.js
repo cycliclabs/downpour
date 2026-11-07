@@ -492,6 +492,12 @@ class FocusApp {
       btn.onclick = () => btn.classList.toggle("is-active");
     });
 
+    // "Coming soon" overlay on the ambient tab points people to their own playlists
+    this.document.getElementById("ambientGoPlaylists").onclick = () => {
+      this.document.querySelector('.music-tab[data-tab="playlists"]').click();
+      this.document.getElementById("spotifyUrlInput").focus();
+    };
+
     // Spotify Loader
     this.document.getElementById("spotifyAddBtn").onclick = () => {
       const input = this.document.getElementById("spotifyUrlInput").value;
