@@ -93,6 +93,14 @@ class FocusApp {
   static RAINDROPS = { base: 10, faster: 12, slower: 8, onTargetBand: [0.9, 1.1], minFocusMs: 60 * 1000 };
   static ETA_PRESETS = [15, 25, 45, 60, 90, 120];   // minutes offered when a task is started
   static CELEBRATION_MS = 6000;
+  // Alert sounds, played when a focus/break phase starts (settings > Clock and Timer). Synthesised, no files.
+  static ALERT_SOUNDS = {
+    beep:    { wave: "sine",   step: .18, length: .15, gain: .07,  notes: { work: [659.25, 880], break: [523.25, 392] } },
+    chime:   { wave: "sine",   step: .30, length: 1.2, gain: .06,  overtone: true, notes: { work: [783.99, 1046.5, 1318.5], break: [1046.5, 783.99, 523.25] } },
+    digital: { wave: "square", step: .11, length: .08, gain: .025, notes: { work: [880, 1174.66, 1568], break: [1568, 1174.66, 880] } }
+  };
+  // Settings kept in localStorage that a backup carries along with the main state.
+  static BACKUP_PREF_KEYS = ["focus-clock-font", "focus-clock-format", "focus-alert-sound", "focus-background-image", "focus-background-video"];
   static POMODORO_WORK_MS = 25 * 60 * 1000;
   static POMODORO_BREAK_MS = 5 * 60 * 1000;
 
@@ -139,6 +147,11 @@ class FocusApp {
     this.loadBackgrounds();                        // finds the folder's images and the uploaded ones, then re-applies the choice
     const savedVideo = localStorage.getItem("focus-background-video");
     if (savedVideo) this.setBackgroundVideo(savedVideo, false);
+    this.clockFormat = localStorage.getItem("focus-clock-format") === "12" ? "12" : "24";
+    this.elements.clockFormat.value = this.clockFormat;
+    const savedAlert = localStorage.getItem("focus-alert-sound");
+    this.alertSound = FocusApp.ALERT_SOUNDS[savedAlert] ? savedAlert : "beep";
+    this.elements.alertSound.value = this.alertSound;
     this.clockFonts = new Map();
     this.clockFont = localStorage.getItem("focus-clock-font") || FocusApp.DEFAULT_CLOCK_FONT;
     this.setClockFont(this.clockFont, false);      // applies at once; the list below fills in asynchronously
@@ -221,6 +234,13 @@ class FocusApp {
       backgroundVideoClear: query("#backgroundVideoClear"),
       backgroundVideoStatus: query("#backgroundVideoStatus"),
       clockFontChoices: query("#clockFontChoices"),
+      clockFormat: query("#clockFormat"),
+      alertSound: query("#alertSound"),
+      alertSoundPreview: query("#alertSoundPreview"),
+      exportDataBtn: query("#exportDataBtn"),
+      importDataBtn: query("#importDataBtn"),
+      importDataInput: query("#importDataInput"),
+      exportStatus: query("#exportStatus"),
       categoryFilter: query("#categoryFilter"),
       taskSelectedDate: query("#taskSelectedDate"),
       categoryEditor: query("#categoryEditor"),
@@ -350,6 +370,12 @@ class FocusApp {
     this.elements.newCategoryName.onkeydown = event => { if (event.key === "Enter") this.addCategory(); };
     this.elements.fullscreenButton.onclick = () => this.toggleFullscreen();
     this.elements.pomodoroPipButton.onclick = () => this.toggleDocumentPiP();
+    this.elements.clockFormat.onchange = () => this.setClockFormat(this.elements.clockFormat.value);
+    this.elements.alertSound.onchange = () => this.setAlertSound(this.elements.alertSound.value, true, true);
+    this.elements.alertSoundPreview.onclick = () => this.previewAlertSound();
+    this.elements.exportDataBtn.onclick = () => this.exportData();
+    this.elements.importDataBtn.onclick = () => this.elements.importDataInput.click();
+    this.elements.importDataInput.onchange = () => this.importData();
     this.elements.clockFontChoices.onclick = event => {
       const choice = event.target.closest("[data-font]");
       if (choice) this.setClockFont(choice.dataset.font);
@@ -516,6 +542,7 @@ class FocusApp {
     this.elements.taskPlanner.ondragend = event => {
       const task = event.target.closest("[data-task-id][draggable='true']");
       if (task) task.classList.remove("is-dragging");
+      this.draggedTaskId = null;
       this.elements.taskPlannerGrid.querySelectorAll(".is-drop-target").forEach(day => day.classList.remove("is-drop-target"));
     };
     this.elements.taskPlanner.ondragover = event => {
@@ -831,6 +858,58 @@ class FocusApp {
     event.dataTransfer?.setData("text/plain", taskId);
     if (event.dataTransfer) event.dataTransfer.effectAllowed = "move";
     taskElement.classList.add("is-dragging");
+    this.draggedTaskId = taskId;
+  }
+
+  // ---- Reordering tasks (drag a task onto another one in the same day's list) ----------------
+  // Order is saved as `order` on each task of that day; tasks without one (new ones) go last, oldest first.
+  compareTasks(first, second) {
+    if (Boolean(first.done) !== Boolean(second.done)) return first.done ? 1 : -1;   // completed tasks sink to the bottom
+    const a = Number.isFinite(first.order) ? first.order : Infinity;
+    const b = Number.isFinite(second.order) ? second.order : Infinity;
+    if (a !== b) return a < b ? -1 : 1;
+    return (first.created || 0) - (second.created || 0);
+  }
+
+  clearDropMarks() {
+    this.document.querySelectorAll(".task.is-drop-before, .task.is-drop-after")
+      .forEach(el => el.classList.remove("is-drop-before", "is-drop-after"));
+  }
+
+  onTaskDragOver(event, targetId, element) {
+    const dragged = this.draggedTaskId ? this.store.findTask(this.draggedTaskId) : null;
+    const target = this.store.findTask(targetId);
+    if (!dragged || !target || dragged.id === target.id || dragged.date !== target.date) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+    const box = element.getBoundingClientRect();
+    const after = event.clientY > box.top + box.height / 2;
+    element.classList.toggle("is-drop-after", after);
+    element.classList.toggle("is-drop-before", !after);
+  }
+
+  onTaskDrop(event, targetId, element) {
+    const after = element.classList.contains("is-drop-after");
+    this.clearDropMarks();
+    const dragged = this.draggedTaskId ? this.store.findTask(this.draggedTaskId) : null;
+    const target = this.store.findTask(targetId);
+    if (!dragged || !target || dragged.id === target.id || dragged.date !== target.date) return;
+    event.preventDefault();
+    this.reorderTask(dragged.id, target.id, after);
+  }
+
+  reorderTask(id, targetId, after) {
+    const moved = this.store.findTask(id);
+    const day = this.store.state.tasks
+      .filter(task => task.date === moved.date)
+      .sort((first, second) => this.compareTasks(first, second));
+    day.splice(day.findIndex(task => task.id === id), 1);
+    const targetIndex = day.findIndex(task => task.id === targetId);
+    day.splice(targetIndex + (after ? 1 : 0), 0, moved);
+    day.forEach((task, index) => { task.order = index; });
+    this.draggedTaskId = null;
+    this.store.save();
+    this.render();
   }
 
   scheduleTask(taskId, date) {
@@ -853,11 +932,7 @@ class FocusApp {
   }
 
   renderClock() {
-    const currentTime = new Date().toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false
-    });
+    const currentTime = this.clockText();
     const pomodoro = this.store.state.pomodoro;
     const timerRunning = Boolean(pomodoro && !pomodoro.paused && this.store.state.active);
 
@@ -866,6 +941,90 @@ class FocusApp {
 
     // The date's visibility is owned by CSS (data-pomodoro-state / data-countdown-state), not set here.
     if (!timerRunning) this.elements.clock.textContent = currentTime;
+  }
+
+  setAlertSound(id, persist = true, preview = false) {
+    this.alertSound = FocusApp.ALERT_SOUNDS[id] ? id : "beep";
+    this.elements.alertSound.value = this.alertSound;
+    if (persist) {
+      localStorage.setItem("focus-alert-sound", this.alertSound);
+      window.dispatchEvent(new Event("focus-changed"));   // syncs the preference to the cloud
+    }
+    if (preview) this.previewAlertSound();
+  }
+
+  previewAlertSound() {
+    this.unlockAudio();
+    this.playPhaseSound("work");
+  }
+
+  // ---- Backup: export / import ---------------------------------------------------------------
+  showExportStatus(message, isError = false) {
+    this.elements.exportStatus.textContent = message;
+    this.elements.exportStatus.classList.toggle("is-error", isError);
+  }
+
+  exportData() {
+    const { active, pomodoro, ...state } = this.store.state;   // the running timer is per device, not part of a backup
+    const prefs = {};
+    FocusApp.BACKUP_PREF_KEYS.forEach(key => {
+      const value = localStorage.getItem(key);
+      if (value != null && !value.startsWith("custom:")) prefs[key] = value;   // uploaded images live in IndexedDB, not in the backup
+    });
+    const backup = { app: "downpour", version: 1, exportedAt: new Date().toISOString(), state, prefs };
+    const url = URL.createObjectURL(new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" }));
+    const link = this.document.createElement("a");
+    link.href = url;
+    link.download = `downpour-backup-${this.today()}.json`;
+    this.document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    this.showExportStatus(`Backup downloaded (${state.tasks.length} ${state.tasks.length === 1 ? "task" : "tasks"}).`);
+  }
+
+  async importData() {
+    const input = this.elements.importDataInput;
+    const file = input.files?.[0];
+    input.value = "";
+    if (!file) return;
+    if (file.size > 20 * 1024 * 1024) return this.showExportStatus("That file is too large to be a backup.", true);
+    let backup;
+    try { backup = JSON.parse(await file.text()); } catch { return this.showExportStatus("That file isn't a valid backup.", true); }
+    const state = backup?.state;
+    if (backup?.app !== "downpour" || !state || !Array.isArray(state.tasks) || !Array.isArray(state.categories)) {
+      return this.showExportStatus("That file isn't a Downpour backup.", true);
+    }
+    if (!window.confirm(`Restore this backup? It replaces all tasks and settings on this device (${state.tasks.length} ${state.tasks.length === 1 ? "task" : "tasks"} in the file).`)) return;
+    this.store.save = () => {};                      // nothing may overwrite the restored data before the reload
+    const { active, pomodoro, ...clean } = state;
+    localStorage.setItem(FocusStore.KEY, JSON.stringify(clean));
+    FocusApp.BACKUP_PREF_KEYS.forEach(key => {
+      const value = backup.prefs?.[key];
+      if (typeof value === "string") localStorage.setItem(key, value);
+      else localStorage.removeItem(key);
+    });
+    localStorage.setItem("focus-local-at", String(Date.now()));   // newer than the cloud copy, so it is pushed on the next sync
+    location.reload();
+  }
+
+  // The big clock shows digits only ("02:30"); AM/PM is left off so the clock keeps the same width as the bar.
+  clockText() {
+    const twelve = this.clockFormat === "12";
+    const parts = new Intl.DateTimeFormat([], { hour: "2-digit", minute: "2-digit", hour12: twelve, hourCycle: twelve ? "h12" : "h23" })
+      .formatToParts(new Date());
+    return parts.filter(part => part.type !== "dayPeriod").map(part => part.value).join("").trim();
+  }
+
+  setClockFormat(format, persist = true) {
+    this.clockFormat = format === "12" ? "12" : "24";
+    this.elements.clockFormat.value = this.clockFormat;
+    this.renderClock();
+    this.renderCalendar();
+    if (persist) {
+      localStorage.setItem("focus-clock-format", this.clockFormat);
+      window.dispatchEvent(new Event("focus-changed"));   // syncs the preference to the cloud
+    }
   }
 
   renderPomodoro(now = Date.now()) {
@@ -1011,20 +1170,23 @@ class FocusApp {
     if (!context) return;
 
     const play = () => {
-      const frequencies = phase === "break" ? [523.25, 392] : [659.25, 880];
-      frequencies.forEach((frequency, index) => {
-        const startAt = context.currentTime + index * 0.18;
-        const oscillator = context.createOscillator();
-        const gain = context.createGain();
-        oscillator.type = "sine";
-        oscillator.frequency.setValueAtTime(frequency, startAt);
-        gain.gain.setValueAtTime(0.0001, startAt);
-        gain.gain.exponentialRampToValueAtTime(0.07, startAt + 0.02);
-        gain.gain.exponentialRampToValueAtTime(0.0001, startAt + 0.15);
-        oscillator.connect(gain);
-        gain.connect(context.destination);
-        oscillator.start(startAt);
-        oscillator.stop(startAt + 0.16);
+      const sound = FocusApp.ALERT_SOUNDS[this.alertSound] || FocusApp.ALERT_SOUNDS.beep;
+      sound.notes[phase === "break" ? "break" : "work"].forEach((frequency, index) => {
+        const startAt = context.currentTime + index * sound.step;
+        const voices = sound.overtone ? [[frequency, 1], [frequency * 2, .25]] : [[frequency, 1]];
+        voices.forEach(([hz, level]) => {
+          const oscillator = context.createOscillator();
+          const gain = context.createGain();
+          oscillator.type = sound.wave;
+          oscillator.frequency.setValueAtTime(hz, startAt);
+          gain.gain.setValueAtTime(0.0001, startAt);
+          gain.gain.exponentialRampToValueAtTime(sound.gain * level, startAt + 0.02);
+          gain.gain.exponentialRampToValueAtTime(0.0001, startAt + sound.length);
+          oscillator.connect(gain);
+          gain.connect(context.destination);
+          oscillator.start(startAt);
+          oscillator.stop(startAt + sound.length + 0.02);
+        });
       });
     };
 
@@ -1476,10 +1638,10 @@ class FocusApp {
       .filter(task => task.date === activeDate)
       .filter(task => this.selectedCategory === "all" || task.category === this.selectedCategory)
       .filter(task => !this.hideCompleted || !task.done) // Add this filter line
-      .sort((first, second) => (first.created || 0) - (second.created || 0));
+      .sort((first, second) => this.compareTasks(first, second));
     const todaysTasks = this.store.state.tasks
       .filter(task => task.date === this.today())
-      .sort((first, second) => (first.created || 0) - (second.created || 0));
+      .sort((first, second) => this.compareTasks(first, second));
 
     // 1. Render tasks for the main Tasks page
     this.renderTaskList(this.elements.tasks, tasks);
@@ -1565,7 +1727,7 @@ class FocusApp {
         const timer = taskElement.querySelector(".timer");
         if (!timer) return;
 
-        const duration = this.duration(this.taskDuration(task));
+        const duration = this.timerText(this.taskDuration(task));
         timer.textContent = task.end && this.store.state.active !== task.id
           ? `Focused for ${duration}`
           : duration;
@@ -2253,18 +2415,16 @@ class FocusApp {
     const classes = `${active ? "active " : ""}${task.done ? "done" : ""}`; 
     const durationMs = this.taskDuration(task);
     const timer = active && !onBreak
-      ? `<div class="timer">${this.duration(durationMs)}</div>`
+      ? `<div class="timer">${this.timerText(durationMs)}</div>`
       : "";
     const sessionButton = active
       ? `<button class="ui-button stop" data-action="session" title="Stop task" aria-label="Stop ${this.escape(task.name)}"><img src="icons/pause.svg" alt="Stop"></button>`
       : `<button class="ui-button" data-action="session" title="Start task" aria-label="Start ${this.escape(task.name)}"><img src="icons/play.svg" alt="Start"></button>`;
 
     return `<div class="task-row"><div class="task ${classes}" data-task-id="${this.escape(task.id)}" data-priority="${priority}" draggable="true" style="--category-color:${this.escape(categoryColor)}">
-        <div class="check" data-action="toggle">
-        </div>
+        <div class="check" data-action="toggle" title="${this.escape(category || "Uncategorized")}"></div>
         <div class="task-main">
-          <div class="task-name"><span class="task-priority-dot" aria-hidden="true"></span><span class="task-name-text">${this.escape(task.name)}</span></div>
-          ${category ? `<div class="category">${this.escape(category)}</div>` : ""}
+          <div class="task-name"><span class="task-name-text">${this.escape(task.name)}</span></div>
         </div>
           ${this.etaMarkup(task)}${timer}<div class="task-actions">${sessionButton}</div>
         </div><div class="task-details" data-task-id="${this.escape(task.id)}" hidden>${this.taskDetailsMarkup(task)}</div></div>`;
@@ -2410,7 +2570,14 @@ class FocusApp {
         this.activeTaskRow = taskRow; 
         this.expandedTaskId = taskId;
       };
-      taskElement.ondragend = () => taskElement.classList.remove("is-dragging");
+      taskElement.ondragend = () => {
+        taskElement.classList.remove("is-dragging");
+        this.draggedTaskId = null;
+        this.clearDropMarks();
+      };
+      taskElement.ondragover = event => this.onTaskDragOver(event, taskId, taskElement);
+      taskElement.ondragleave = () => taskElement.classList.remove("is-drop-before", "is-drop-after");
+      taskElement.ondrop = event => this.onTaskDrop(event, taskId, taskElement);
       const toggle = taskElement.querySelector('[data-action="toggle"]');
       if (toggle) toggle.onclick = () => this.toggleDone(taskId);
       const session = taskElement.querySelector('[data-action="session"]');
@@ -2687,7 +2854,7 @@ class FocusApp {
     if (!Number.isFinite(task.estimateMs) || task.estimateMs <= 0 || task.done) return "";
     if (this.store.state.active !== task.id) return `Est ${this.shortDuration(task.estimateMs)}`;
     const finishAt = this.etaFinishAt(task, now);
-    return finishAt ? `ETA ${this.formatTime(finishAt)}` : "Over estimate";
+    return finishAt ? `ETA ${this.formatTime(finishAt, false)}` : "Over estimate";   // no AM/PM: saves space on the bar
   }
 
   etaMarkup(task) {
@@ -3100,8 +3267,12 @@ class FocusApp {
     return `${year}-${month}-${day}`;
   }
 
-  formatTime(value) {
-    return new Date(value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  formatTime(value, withPeriod = true) {
+    const twelve = this.clockFormat === "12";
+    return new Intl.DateTimeFormat([], { hour: "2-digit", minute: "2-digit", hour12: twelve, hourCycle: twelve ? "h12" : "h23" })
+      .formatToParts(new Date(value))
+      .filter(part => withPeriod || part.type !== "dayPeriod")
+      .map(part => part.value).join("").trim();
   }
 
   formatDateTime(value) {
@@ -3135,6 +3306,15 @@ class FocusApp {
       return task.accumulatedMs + currentSegment;
     }
     return this.elapsed(task.start, task.end || now);
+  }
+
+  // Task timer: seconds only during the first minute ("42s"), then minutes ("1m", "1h 05m").
+  timerText(milliseconds) {
+    const seconds = Math.floor((Number.isFinite(milliseconds) ? milliseconds : 0) / 1000);
+    if (seconds < 60) return `${seconds}s`;
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    return hours ? `${hours}h ${String(minutes).padStart(2, "0")}m` : `${minutes}m`;
   }
 
   duration(milliseconds) {

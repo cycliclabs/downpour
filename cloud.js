@@ -3,7 +3,8 @@ const SUPABASE_URL = "https://btpzahserhjlzdmhgjvp.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_gCDBQujMFh7TLaKhtGIyng_MlK-wkXI";  // Project Settings -> API -> anon public key
 
 class CloudSync {
-  static PREF_KEYS = ["focus-clock-font", "focus-background-image", "focus-background-video"];
+  static PREF_KEYS = ["focus-clock-font", "focus-clock-format", "focus-alert-sound", "focus-background-image", "focus-background-video"];
+  static USERNAME_RE = /^[A-Za-z0-9_]{3,20}$/;
   static LOCAL_AT = "focus-local-at";
   static EXCLUDE = ["active", "pomodoro"]; // per-device, never synced
 
@@ -17,6 +18,10 @@ class CloudSync {
       form: doc.getElementById("accountForm"),
       email: doc.getElementById("accountEmail"),
       password: doc.getElementById("accountPassword"),
+      username: doc.getElementById("accountUsername"),
+      usernameSet: doc.getElementById("accountUsernameSet"),
+      usernameInput: doc.getElementById("accountUsernameInput"),
+      usernameSave: doc.getElementById("accountUsernameSave"),
       signIn: doc.getElementById("accountSignIn"),
       signUp: doc.getElementById("accountSignUp"),
       signOut: doc.getElementById("accountSignOut"),
@@ -31,6 +36,12 @@ class CloudSync {
       return;
     }
     this.client = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    this.el.usernameSave.onclick = () => this.saveUsername();
+    // Raindrop / streak chips open a leaderboard popover (see index.html); refresh it on every open.
+    doc.querySelectorAll("[data-popover]").forEach(chip => chip.addEventListener("click", () => {
+      const popover = doc.getElementById(chip.dataset.popover);
+      if (!popover.hidden) this.loadLeaderboard(chip.dataset.popover === "streakPopover" ? "streak" : "raindrops");
+    }));
     this.el.signIn.onclick = () => this.auth("signIn");
     this.el.signUp.onclick = () => this.auth("signUp");
     this.el.signOut.onclick = async () => {
@@ -54,19 +65,91 @@ class CloudSync {
   render() {
     this.el.form.hidden = Boolean(this.user);
     this.el.signedIn.hidden = !this.user;
-    if (this.user) this.el.who.textContent = this.user.email;
-    [this.el.email, this.el.password, this.el.signIn, this.el.signUp].forEach(e => e.disabled = !this.configured);
+    if (this.user) {
+      const name = this.username();
+      this.el.who.textContent = name ? `${name} · ${this.user.email}` : this.user.email;
+      this.el.usernameSet.hidden = Boolean(name);   // accounts made before usernames existed can pick one here
+    }
+    [this.el.email, this.el.password, this.el.username, this.el.signIn, this.el.signUp].forEach(e => e.disabled = !this.configured);
+  }
+
+  username() {
+    return this.user?.user_metadata?.username || "";
+  }
+
+  async usernameTaken(name) {
+    const { data, error } = await this.client.rpc("username_available", { name });
+    if (error) throw error;
+    return data === false;
   }
 
   async auth(kind) {
     const email = this.el.email.value.trim();
     const password = this.el.password.value;
+    const username = this.el.username.value.trim();
     if (!email || password.length < 6) return this.say("Enter an email and a password of at least 6 characters.", true);
+    if (kind === "signUp") {
+      if (!CloudSync.USERNAME_RE.test(username)) return this.say("Choose a username of 3-20 letters, numbers or underscores.", true);
+      try {
+        if (await this.usernameTaken(username)) return this.say("That username is taken. Try another.", true);
+      } catch (error) { return this.say(`Couldn't check the username: ${error.message}`, true); }
+    }
     this.say(kind === "signUp" ? "Creating account..." : "Signing in...");
-    const { data, error } = await this.client.auth[kind === "signUp" ? "signUp" : "signInWithPassword"]({ email, password });
+    const credentials = kind === "signUp" ? { email, password, options: { data: { username } } } : { email, password };
+    const { data, error } = await this.client.auth[kind === "signUp" ? "signUp" : "signInWithPassword"](credentials);
     if (error) return this.say(error.message, true);
     if (kind === "signUp" && !data.session) this.say("Check your email to confirm your account, then sign in.");
     this.el.password.value = "";
+  }
+
+  // Existing accounts without a username.
+  async saveUsername() {
+    const name = this.el.usernameInput.value.trim();
+    if (!CloudSync.USERNAME_RE.test(name)) return this.say("Choose a username of 3-20 letters, numbers or underscores.", true);
+    try {
+      if (await this.usernameTaken(name)) return this.say("That username is taken. Try another.", true);
+    } catch (error) { return this.say(`Couldn't check the username: ${error.message}`, true); }
+    const { data, error } = await this.client.auth.updateUser({ data: { username: name } });
+    if (error) return this.say(error.message, true);
+    this.user = data.user;
+    this.el.usernameInput.value = "";
+    this.render();
+    this.lastPushed = null;
+    await this.push();
+  }
+
+  // ---- Leaderboards ------------------------------------------------------------------------
+  currentStreak(state) {
+    const { count = 0, lastDate = null } = state.streak || {};
+    if (!lastDate) return 0;
+    const key = date => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    return lastDate === key(new Date()) || lastDate === key(yesterday) ? count : 0;
+  }
+
+  async loadLeaderboard(kind) {
+    const host = this.doc.getElementById(kind === "streak" ? "streakBoard" : "raindropBoard");
+    const note = text => { host.replaceChildren(Object.assign(this.doc.createElement("p"), { className: "settings-note", textContent: text })); };
+    if (!this.configured) return note("Leaderboards need cloud sync to be set up.");
+    if (!this.user) return note("Sign in (settings → Account) to see the leaderboard.");
+    note("Loading...");
+    const { data, error } = await this.client.from("profiles").select("user_id, username, raindrops, streak")
+      .order(kind, { ascending: false }).order("username", { ascending: true }).limit(10);
+    if (error) return note(`Couldn't load the leaderboard: ${error.message}`);
+    if (!data.length) return note("No one is on the board yet.");
+    const rows = data.map((row, index) => {
+      const line = this.doc.createElement("div");
+      line.className = "focus-goal-label leaderboard-row";
+      if (row.user_id === this.user.id) line.classList.add("is-you");
+      const name = this.doc.createElement("span");
+      name.textContent = `${index + 1}. ${row.username}${row.user_id === this.user.id ? " (you)" : ""}`;
+      const value = this.doc.createElement("span");
+      value.textContent = String(row[kind]);
+      line.append(name, value);
+      return line;
+    });
+    host.replaceChildren(...rows);
   }
 
   async onSession(session) {
@@ -122,6 +205,18 @@ class CloudSync {
     const { error } = await this.client.from("user_data")
       .upsert({ user_id: this.user.id, data: payload, updated_at: at.toISOString() });
     if (error) return this.say(`Sync failed: ${error.message}`, true);
+    const username = this.username();
+    if (username) {
+      const { error: profileError } = await this.client.from("profiles").upsert({
+        user_id: this.user.id,
+        username,
+        raindrops: Math.max(0, Math.floor(payload.state.raindrops || 0)),
+        streak: this.currentStreak(payload.state),
+        updated_at: at.toISOString()
+      });
+      if (profileError) return this.say(
+        profileError.code === "23505" ? "That username is already taken." : `Leaderboard update failed: ${profileError.message}`, true);
+    }
     this.lastPushed = json;
     localStorage.setItem(CloudSync.LOCAL_AT, String(at.getTime()));
     this.say(`Synced at ${at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}.`);

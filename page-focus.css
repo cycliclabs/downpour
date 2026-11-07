@@ -196,23 +196,6 @@ body.is-pip .center-stage {
     border-radius: 50%;
 }
 
-:is(.focus-now-task, .focus-tasks-content) .done .check {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-:is(.focus-now-task, .focus-tasks-content) .done .check::after {
-    position: static;
-    font-size: .65em;
-    line-height: 1;
-}
-
-:is(.focus-now-task, .focus-tasks-content) .task-priority-dot {
-    width: .5em;
-    height: .5em;
-}
-
 :is(.focus-now-task, .focus-tasks-content) .task-actions {
     flex: none;
     gap: .25em;
@@ -756,9 +739,9 @@ body.is-pip .center-stage {
     width: 100%;
     display: flex;
     flex-direction: column;
-    gap: .5em;
+    gap: .4em;
     max-height: calc(40 * var(--u));
-    padding: .6em;
+    padding: .5em;
     overflow: hidden;
     font-size: var(--bar-font);
     border-radius: var(--radius);
@@ -786,13 +769,21 @@ body.is-pip .center-stage {
     flex: 1;
     min-height: 0;
     overflow-y: auto;
-    gap: .4em;
+    gap: .3em;
 }
 
+/* compact rows in the list (the bar itself keeps its full height) */
 .focus-tasks-content .task-row {
     width: 100%;
-    height: var(--bar-h);
+    height: calc(var(--bar-h) * .88);
     flex: none;
+}
+
+.focus-tasks-content .task-actions :is(.ui-button, .ui-button.stop) {
+    width: 2em;
+    min-width: 2em;
+    height: 2em;
+    min-height: 2em;
 }
 
 .focus-add-task-btn {

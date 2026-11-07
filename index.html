@@ -6,6 +6,7 @@
   <title>Downpour</title>
   <link rel="stylesheet" href="settings.css">
   <link rel="stylesheet" href="common.css">
+  <link rel="stylesheet" href="loader.css">
   <link rel="stylesheet" href="page-focus.css">
   <link rel="stylesheet" href="page-tasksandsomefocus.css">
   <link rel="stylesheet" href="page-analytics.css">
@@ -27,6 +28,16 @@
 
 
 <body data-page="focus">
+
+  <!-- Loading screen: shown on every page load until the background and fonts are ready (loader.js) -->
+  <div class="loader" id="loader" role="progressbar" aria-label="Loading Downpour" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+    <div class="loader-brand">downpour</div>
+    <div class="loader-progress">
+      <div class="loader-track"><div class="loader-fill" id="loaderFill"></div></div>
+      <span class="loader-percent" id="loaderPercent">0%</span>
+    </div>
+  </div>
+  <script src="loader.js"></script>
 
 
 
@@ -72,12 +83,14 @@
           <div class="panel stat-popover" id="raindropPopover" hidden>
             <h2 class="panel-title">Raindrops</h2>
             <p class="settings-note"><b>How to earn</b><br>Finish tasks that have an estimate. On target, faster and slower all pay out.</p>
-            <p class="settings-note"><b>Use</b><br>Coming later</p>
+            <h3 class="leaderboard-title">Leaderboard</h3>
+            <div class="leaderboard" id="raindropBoard"></div>
           </div>
           <div class="panel stat-popover" id="streakPopover" hidden>
             <h2 class="panel-title">Day streak</h2>
             <p class="settings-note"><b>How to earn</b><br>Complete at least one task every day.</p>
-            <p class="settings-note"><b>Use</b><br>Coming later</p>
+            <h3 class="leaderboard-title">Leaderboard</h3>
+            <div class="leaderboard" id="streakBoard"></div>
           </div>
         </div>
         <button class="ui-button" id="settingsButton" type="button" aria-label="Open Settings" aria-pressed="false" title="Settings">
@@ -403,9 +416,9 @@
         <button type="button" class="settings-nav-item is-active" data-settings-tab="background">Background</button>
         <button type="button" class="settings-nav-item" data-settings-tab="clock">Clock and Timer</button>
         <button type="button" class="settings-nav-item" data-settings-tab="tasks">Tasks</button> <!-- NEW -->
-        <button type="button" class="settings-nav-item" data-settings-tab="account">Account</button>
         <button type="button" class="settings-nav-item" data-settings-tab="about">About Us</button>
-        <button type="button" class="settings-nav-item settings-nav-bottom" data-settings-tab="export">Export Your Data</button>
+        <button type="button" class="settings-nav-item settings-nav-bottom" data-settings-tab="account">Account</button>
+        <button type="button" class="settings-nav-item" data-settings-tab="export">Export Your Data</button>
       </nav>
 
       <!-- Right Content Area -->
@@ -435,9 +448,15 @@
 
         <!-- Clock and Timer Tab -->
         <section class="settings-tab" id="tab-clock" hidden>
-          <h3>Clock Font</h3>
+          <h3>Time Format</h3>
+          <select class="ui-control" id="clockFormat" style="width: 100%;" aria-label="Clock time format">
+            <option value="24">24-hour (14:30)</option>
+            <option value="12">12-hour (02:30 PM)</option>
+          </select>
+
+          <h3 style="margin-top: 24px;">Clock Font</h3>
           <div class="font-choices" id="clockFontChoices" role="group" aria-label="Choose clock font"></div>
-          
+
           <h3 style="margin-top: 24px;">Pomodoro</h3>
           <form class="pomodoro-settings" id="pomodoroSettings">
             <label for="pomodoroFocusMinutes">
@@ -452,26 +471,38 @@
           </form>
 
           <h3 style="margin-top: 24px;">Alert Sound</h3>
-          <select class="ui-control" style="width: 100%;">
-            <option>Default Beep</option>
-            <option>Soft Chime</option>
-            <option>Digital</option>
-          </select>
+          <div class="field-row" style="margin-top: 0;">
+            <select class="ui-control" id="alertSound" style="flex: 1;" aria-label="Alert sound">
+              <option value="beep">Default Beep</option>
+              <option value="chime">Soft Chime</option>
+              <option value="digital">Digital</option>
+            </select>
+            <button class="ui-control" id="alertSoundPreview" type="button" aria-label="Preview alert sound">
+              <svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor" aria-hidden="true" focusable="false"><path d="M8 5v14l11-7z"></path></svg>
+              <span>Preview</span>
+            </button>
+          </div>
         </section>
 
         <!-- About Us Tab -->
         <section class="settings-tab" id="tab-about" hidden>
           <h3>About Us</h3>
           <p style="font-size: 13px; line-height: 1.6; color: var(--muted);">
-            Downpour is a minimalist focus application designed to help you get into a state of deep work. 
-            By combining a flexible Pomodoro timer with task tracking and ambient soundscapes, it aims to remove friction 
+            Downpour is a minimalist focus application designed to help you get into a state of deep work.
+            By combining a flexible Pomodoro timer with task tracking and ambient soundscapes, it aims to remove friction
             and make focusing effortless.
           </p>
+          <!-- TODO: replace the href below with your GitHub repo link -->
+          <a class="ui-control about-link" id="githubLink" href="#" target="_blank" rel="noopener noreferrer">
+            <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"></path></svg>
+            <span>View our open source project</span>
+          </a>
         </section>
 
         <section class="settings-tab" id="tab-account" hidden>
           <h3>Account</h3>
           <form id="accountForm" class="account-form">
+            <input class="ui-field" type="text" id="accountUsername" placeholder="Username (needed to create an account)" autocomplete="username" maxlength="20" aria-label="Username">
             <input class="ui-field" type="email" id="accountEmail" placeholder="Email" autocomplete="email" aria-label="Email">
             <input class="ui-field" type="password" id="accountPassword" placeholder="Password" autocomplete="current-password" aria-label="Password">
             <div class="field-row">
@@ -481,6 +512,13 @@
           </form>
           <div id="accountSignedIn" class="account-form" hidden>
             <p class="settings-note" id="accountWho"></p>
+            <div id="accountUsernameSet" hidden>
+              <p class="settings-note">Pick a username to appear on the leaderboards.</p>
+              <div class="field-row">
+                <input class="ui-field" type="text" id="accountUsernameInput" placeholder="Username" maxlength="20" aria-label="Choose a username">
+                <button class="ui-control" id="accountUsernameSave" type="button">Save</button>
+              </div>
+            </div>
             <div class="field-row"><button class="ui-control" id="accountSignOut" type="button">Sign out</button></div>
           </div>
           <p class="settings-note" id="accountStatus" aria-live="polite"></p>
@@ -490,14 +528,16 @@
         <section class="settings-tab" id="tab-export" hidden>
           <h3>Export Your Data</h3>
           <p style="font-size: 13px; color: var(--muted); margin-bottom: 12px; line-height: 1.5;">
-            Downpour is 100% local-first. Your tasks, stats, and settings are saved securely in your browser, not on a server. 
-            <br><br>
+            Your tasks, stats and settings live in this browser (and sync to your account when you're signed in). <br><br>
             Download a backup to keep your data safe, or import a previous backup to restore it.
           </p>
           <div style="display: flex; gap: 8px; margin-top: 16px;">
             <button class="ui-control" id="exportDataBtn" style="flex: 1;">Download Backup</button>
             <button class="ui-control" id="importDataBtn" style="flex: 1;">Import Backup</button>
           </div>
+          <input type="file" id="importDataInput" accept="application/json,.json" hidden>
+          <p class="settings-note" id="exportStatus" aria-live="polite"></p>
+          <p class="settings-note">Backups include tasks, categories, stats and settings. Images you uploaded as backgrounds stay on this device only.</p>
         </section>
 
         <section class="settings-tab" id="tab-tasks" hidden>

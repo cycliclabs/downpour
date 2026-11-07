@@ -1,0 +1,86 @@
+/* Loading screen (loader.js). Built from the app's own tokens: DM Sans wordmark, rain -> accent bar. */
+.loader {
+    position: fixed;
+    inset: 0;
+    z-index: 2000;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 28px;
+    background: radial-gradient(circle at center, #1a1d22 0%, #0b0c0f 100%);
+    transition: opacity .6s ease, visibility .6s ease;
+}
+
+.loader.is-done {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+}
+
+.loader-brand {
+    font-size: 48px;
+    font-weight: 700;
+    letter-spacing: -1.5px;
+    line-height: 1;
+    color: var(--text);
+    text-shadow: 0 0 28px rgba(255, 255, 255, .2);
+    animation: loader-breathe 2.4s ease-in-out infinite;
+}
+
+.loader-progress {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+}
+
+/* thin, borderless pill with a soft gradient and a moving sheen */
+.loader-track {
+    width: min(220px, 60vw);
+    height: 3px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, .1);
+}
+
+.loader-fill {
+    position: relative;
+    width: 0;
+    height: 100%;
+    overflow: hidden;
+    border-radius: 999px;
+    background: linear-gradient(90deg, var(--rain), var(--accent));
+    box-shadow: 0 0 12px rgba(0, 255, 132, .45);
+}
+
+.loader-fill::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, .6), transparent);
+    transform: translateX(-100%);
+    animation: loader-sheen 1.4s ease-in-out infinite;
+}
+
+.loader-percent {
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: .08em;
+    font-variant-numeric: tabular-nums;
+}
+
+@keyframes loader-breathe {
+    0%, 100% { opacity: .85; }
+    50%      { opacity: 1; }
+}
+
+@keyframes loader-sheen {
+    to { transform: translateX(100%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .loader-brand, .loader-fill::after { animation: none; }
+    .loader { transition-duration: .01s; }
+}

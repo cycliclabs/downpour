@@ -287,3 +287,49 @@
     border-color: rgba(255, 255, 255, .5);
     color: var(--text);
 }
+
+/* About: link to the open source repo (a plain .ui-control) */
+.about-link {
+    width: fit-content;
+    height: 40px;
+    margin-top: 16px;
+    padding: 0 16px;
+    gap: 10px;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.about-link svg {
+    width: 20px;
+    height: 20px;
+    flex: none;
+}
+
+/* Raindrop / streak leaderboards inside the stat popovers (rows reuse .focus-goal-label) */
+.leaderboard-title {
+    margin: 14px 0 8px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.leaderboard {
+    max-height: 240px;
+    overflow-y: auto;
+}
+
+.leaderboard .settings-note {
+    margin: 0;
+}
+
+.leaderboard-row span:first-child {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.leaderboard-row.is-you span:first-child {
+    color: var(--text);
+    font-weight: 600;
+}
