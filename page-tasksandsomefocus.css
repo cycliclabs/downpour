@@ -638,3 +638,19 @@
 .task-actions .ui-button:hover {
     opacity: 1;
 }
+/* Daily target modal: the task editor's card, with a title instead of the name field */
+.task-detail-title {
+    flex: 1;
+    margin: 0;
+    padding: 6px 0;
+}
+
+.target-note {
+    margin: -4px 0 0;
+}
+
+.target-presets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}

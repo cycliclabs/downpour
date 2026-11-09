@@ -133,6 +133,8 @@
 }
 
 .activity-scroll {
+    margin-block: auto;          /* centred vertically between the heading and the legend */
+    container-type: inline-size; /* lets phones size the cells to the box (see below) */
     overflow-x: auto;
     background: black;
     border: 1px solid rgba(255, 255, 255, 0.05);
@@ -238,7 +240,7 @@ button.activity-cell[aria-pressed="true"] {
     display: flex;
     align-items: center;
     gap: 3px;
-    margin-top: auto;
+    margin-top: 0;
     align-self: flex-end;      /* size to content, align right */
     padding: 8px 12px;         /* symmetric padding now that it's content-sized */
     color: var(--muted);
@@ -318,65 +320,144 @@ button.activity-cell[aria-pressed="true"] {
     font-size: 14px
 }
 
+.focus-trend-chart {
+    position: relative;
+}
+
+.focus-trend-stage {
+    position: relative;
+}
+
 .focus-trend-svg {
     display: block;
     width: 100%;
     height: auto;
-    overflow: visible
+    overflow: visible;
+    cursor: crosshair;
 }
 
 .focus-trend-svg .trend-y-tick line {
     stroke: var(--line);
-    stroke-width: 1
+    stroke-width: 1;
+    stroke-dasharray: 2 5;
+    stroke-linecap: round;
+    opacity: .7;
+}
+
+.focus-trend-svg .trend-y-tick.is-base line {
+    stroke-dasharray: none;
+    opacity: 1;
 }
 
 .focus-trend-svg .trend-y-tick text,
 .focus-trend-svg .trend-x-label {
     fill: var(--muted);
-    font: 10px/1 sans-serif
+    font: 500 10px/1 'DM Sans', system-ui, sans-serif;
 }
 
 .focus-trend-svg .trend-line {
     fill: none;
-    stroke: #39d353;
-    stroke-width: 2.5;
+    stroke-width: 2.25;
     stroke-linecap: round;
-    stroke-linejoin: round
+    stroke-linejoin: round;
+    filter: drop-shadow(0 2px 6px rgba(0, 0, 0, .35));
+}
+
+.focus-trend-svg .trend-area {
+    pointer-events: none;
 }
 
 .focus-trend-svg .trend-point {
-    fill: #39d353;
-    stroke: var(--card);
-    stroke-width: 1.5
+    stroke: rgba(20, 20, 20, .8);
+    stroke-width: 1;
+    pointer-events: none;
 }
 
+/* draw-in, only when the chart's subject changed (not on the once-a-minute refresh) */
+.focus-trend-chart.is-animated .trend-line {
+    stroke-dasharray: 1;
+    stroke-dashoffset: 1;
+    animation: trend-draw .9s cubic-bezier(.4, 0, .2, 1) forwards;
+}
 
+.focus-trend-chart.is-animated .trend-area,
+.focus-trend-chart.is-animated .trend-point {
+    opacity: 0;
+    animation: trend-fade .6s ease .5s forwards;
+}
 
+@keyframes trend-draw { to { stroke-dashoffset: 0; } }
+@keyframes trend-fade { to { opacity: 1; } }
 
+/* hover: guide line + a dot that glides between points and pulses */
+.focus-trend-svg .trend-guide {
+    stroke: var(--text);
+    stroke-width: 1;
+    stroke-dasharray: 3 4;
+    opacity: 0;
+    transition: opacity .2s ease, transform .18s cubic-bezier(.2, .8, .2, 1);
+    pointer-events: none;
+}
 
+.focus-trend-svg .trend-hover {
+    opacity: 0;
+    transition: opacity .2s ease, transform .18s cubic-bezier(.2, .8, .2, 1);
+    pointer-events: none;
+}
 
+.focus-trend-svg .trend-focus {
+    fill: var(--hover-color, var(--text));
+    stroke: #fff;
+    stroke-width: 2;
+}
 
+.focus-trend-svg .trend-halo {
+    fill: var(--hover-color, var(--text));
+    opacity: .28;
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: trend-pulse 1.6s ease-out infinite;
+}
 
+.focus-trend-stage.is-hovering .trend-guide,
+.focus-trend-stage.is-hovering .trend-hover {
+    opacity: 1;
+}
 
+@keyframes trend-pulse {
+    0%   { transform: scale(.6); opacity: .45; }
+    100% { transform: scale(1.6); opacity: 0; }
+}
 
+/* label: the same .focus-goal-tip as the daily target, anchored to the point */
+.focus-trend-stage .trend-tip {
+    bottom: auto;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+    transform: translate(-50%, -100%);
+    transition: left .12s ease-out, top .12s ease-out;
+}
 
+.trend-tip-when {
+    color: var(--muted);
+    font-size: 10px;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+}
 
+.trend-tip-row {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+@media (prefers-reduced-motion: reduce) {
+    .focus-trend-chart.is-animated .trend-line,
+    .focus-trend-chart.is-animated .trend-area,
+    .focus-trend-chart.is-animated .trend-point { animation: none; opacity: 1; stroke-dashoffset: 0; }
+    .focus-trend-svg .trend-halo { animation: none; }
+}
 
 #timeLine {
     display: flex;
@@ -785,4 +866,40 @@ button.activity-cell[aria-pressed="true"] {
 .trend-multi-content label.disabled {
     opacity: 0.4;
     cursor: not-allowed;
+}
+
+/* Phones: shrink the heatmap so most of the year fits; whatever is left scrolls (it opens on the selected day). */
+@media (max-width: 768px) {
+    .activity-scroll {
+        padding: 10px;
+    }
+
+    .activity-calendar {
+        --activity-cell-gap: 1px;
+        --activity-cell-size: max(4px, calc((100cqw - 30px - (var(--activity-weeks, 53) - 1) * var(--activity-cell-gap)) / var(--activity-weeks, 53)));
+    }
+
+    .activity-months {
+        margin-left: 30px;
+        height: 16px;
+        font-size: 9px;
+    }
+
+    .activity-chart {
+        grid-template-columns: 22px max-content;
+        gap: 8px;
+    }
+
+    .activity-weekdays {
+        font-size: 8px;
+        line-height: 1;
+    }
+
+    .activity-cell {
+        border-radius: 1.5px;
+    }
+
+    #focusActivity {
+        min-height: 0;
+    }
 }

@@ -11,7 +11,7 @@ class FocusStore {
       tasks: [],
       active: null,
       brainDump: "",
-      dailyTarget: null,
+      dailyTargets: {},                          // { "YYYY-MM-DD": milliseconds }; 0 = skipped that day
       pomodoro: null,
       pomodoroSettings: { focusMinutes: 25, breakMinutes: 5 },
       raindrops: 0,                              // currency earned by completing tasks (see FocusApp.RAINDROPS)
@@ -32,9 +32,14 @@ class FocusStore {
     const savedPomodoroSettings = saved.pomodoroSettings && typeof saved.pomodoroSettings === "object"
       ? saved.pomodoroSettings
       : {};
+    // older versions kept a single { date, milliseconds }: fold it into the per-day history
+    const dailyTargets = { ...(saved.dailyTargets && typeof saved.dailyTargets === "object" ? saved.dailyTargets : {}) };
+    if (saved.dailyTarget?.date && !(saved.dailyTarget.date in dailyTargets)) dailyTargets[saved.dailyTarget.date] = Number(saved.dailyTarget.milliseconds) || 0;
+    delete saved.dailyTarget;
     return {
       ...defaults,
       ...saved,
+      dailyTargets,
       pomodoroSettings: { ...defaults.pomodoroSettings, ...savedPomodoroSettings },
       streak: { ...defaults.streak, ...(saved.streak && typeof saved.streak === "object" ? saved.streak : {}) }
     };
@@ -107,7 +112,6 @@ class FocusApp {
   constructor(document, store = new FocusStore()) {
     this.document = document;
     this.store = store;
-    this.askForDailyTarget();
     this.selectedDate = this.today();
     this.selectedActivityYear = new Date().getFullYear();
     this.selectedActivityRange = "daily";
@@ -158,6 +162,7 @@ class FocusApp {
     this.loadClockFonts();
     this.bindEvents();
     this.render();
+    this.askForDailyTargetWhenReady();
     window.setInterval(() => {
       const now = Date.now();
 
@@ -247,6 +252,7 @@ class FocusApp {
       tasks: query("#tasks"),
       focusTotal: query("#focusTotal"),
       focusProgress: query("#focusProgress"),
+      focusTargetBtn: query("#focusTargetBtn"),
       activityMonths: query("#activityMonths"),
       activityGrid: query("#activityGrid"),
       activityLegend: query(".activity-legend"),
@@ -394,6 +400,7 @@ class FocusApp {
     this.elements.backgroundVideoUrl.onkeydown = event => {
       if (event.key === "Enter") this.applyBackgroundVideoInput();
     };
+    this.elements.focusTargetBtn.onclick = () => this.openTargetModal(this.elements.focusTargetBtn.dataset.date || this.today());
     this.elements.backgroundVideoClear.onclick = () => this.setBackgroundVideo(null);
 
     this.elements.activityCategoryFilter.onchange = (e) => {
@@ -411,6 +418,11 @@ class FocusApp {
     this.document.addEventListener("keydown", event => {
       if (event.key !== "Escape") return;
       
+      const targetModal = this.document.getElementById("targetModal");
+      if (targetModal && !targetModal.hidden) {
+        this.closeTargetModal();
+        return;
+      }
       const modal = this.document.getElementById("taskModal");
       if (modal && !modal.hidden) {
         this.closeTaskModal();
@@ -451,6 +463,9 @@ class FocusApp {
 
       // Close Tasks Dropdown
       if (!this.elements.focusTasksDropdown.contains(event.target)) this.closeFocusTasks();
+
+      const targetModal = this.document.getElementById("targetModal");
+      if (targetModal && !targetModal.hidden && event.target === targetModal) this.closeTargetModal();
 
       // Close Task Modal / Inline Details
       const modal = this.document.getElementById("taskModal");
@@ -737,18 +752,86 @@ class FocusApp {
     this.elements.focusMusicToggle.title = "Focus Music";
   }
 
-  askForDailyTarget() {
-    const today = this.today();
-    if (this.store.state.dailyTarget?.date === today) return;
+  // ---- Daily target -------------------------------------------------------------
+  targetFor(dateKey) {
+    return Number(this.store.state.dailyTargets?.[dateKey]) || 0;
+  }
 
-    const promptFn = typeof window !== "undefined" && typeof window.prompt === "function" ? window.prompt.bind(window) : null;
-    const answer = promptFn ? promptFn("How many hours do you plan to focus today? Enter a number, such as 4 or 2.5.") : null;
-    const hours = answer === null ? null : Number(String(answer).trim());
-    this.store.state.dailyTarget = {
-      date: today,
-      milliseconds: Number.isFinite(hours) && hours > 0 ? hours * 60 * 60 * 1000 : 0
-    };
+  setTarget(dateKey, milliseconds) {
+    this.store.state.dailyTargets = { ...this.store.state.dailyTargets, [dateKey]: Math.max(0, Math.round(milliseconds)) };
     this.store.save();
+  }
+
+  // First visit of a day: ask once the loading screen is gone. Any answer (even Skip) is stored, so a
+  // refresh the same day doesn't ask again; tomorrow's first visit does.
+  askForDailyTargetWhenReady() {
+    const today = this.today();
+    if (today in this.store.state.dailyTargets) return;
+    const wait = window.setInterval(() => {
+      if (this.document.getElementById("loader")) return;
+      window.clearInterval(wait);
+      if (!(this.today() in this.store.state.dailyTargets)) window.setTimeout(() => this.openTargetModal(this.today(), true), 400);
+    }, 200);
+  }
+
+  // Same card as the task editor (.task-details inside .task-modal).
+  openTargetModal(dateKey, asking = false) {
+    this.closeTaskModal();
+    const modal = this.document.getElementById("targetModal");
+    const current = this.targetFor(dateKey);
+    const hours = current ? Math.floor(current / 3600000) : "";
+    const minutes = current ? Math.round((current % 3600000) / 60000) : "";
+    const presets = [1, 2, 3, 4, 6].map(h => `<button class="ui-control" type="button" data-preset="${h}">${h}h</button>`).join("");
+    modal.innerHTML = `<div class="task-details" role="dialog" aria-modal="true" aria-label="Daily target">
+      <div class="task-detail-head">
+        <h2 class="panel-title task-detail-title">${asking ? "Today's focus target" : (current ? "Edit target" : "Add target")}</h2>
+      </div>
+      <p class="settings-note target-note">${asking ? "How long do you want to focus today?" : this.escape(this.formatTaskDate(dateKey))}</p>
+      <div class="target-presets">${presets}</div>
+      <div class="task-detail-fields">
+        <label class="task-detail-field"><span>Hours</span>
+          <input type="number" class="ui-field" id="targetHours" min="0" max="24" step="1" inputmode="numeric" placeholder="0" value="${hours}"></label>
+        <label class="task-detail-field"><span>Minutes</span>
+          <input type="number" class="ui-field" id="targetMinutes" min="0" max="59" step="5" inputmode="numeric" placeholder="0" value="${minutes}"></label>
+      </div>
+      <p class="settings-note is-error" id="targetError" aria-live="polite"></p>
+      <div class="task-detail-footer">
+        ${!asking && current ? '<button class="ui-control" type="button" data-action="remove">Remove target</button>' : ""}
+        <button class="ui-control" type="button" data-action="cancel">${asking ? "Skip today" : "Cancel"}</button>
+        <button class="ui-control" type="button" data-action="save">${asking ? "Set target" : "Save"}</button>
+      </div>
+    </div>`;
+    modal.hidden = false;
+    this.targetModalState = { dateKey, asking };
+    const hoursInput = modal.querySelector("#targetHours");
+    const minutesInput = modal.querySelector("#targetMinutes");
+    modal.querySelectorAll("[data-preset]").forEach(button => {
+      button.onclick = () => { hoursInput.value = button.dataset.preset; minutesInput.value = ""; };
+    });
+    modal.querySelector('[data-action="cancel"]').onclick = () => this.closeTargetModal();
+    const remove = modal.querySelector('[data-action="remove"]');
+    if (remove) remove.onclick = () => { this.setTarget(dateKey, 0); this.closeTargetModal(true); };
+    const save = () => {
+      const total = (Number(hoursInput.value) || 0) * 3600000 + (Number(minutesInput.value) || 0) * 60000;
+      if (total <= 0 || total > 24 * 3600000) { modal.querySelector("#targetError").textContent = "Enter a target between 1 minute and 24 hours."; return; }
+      this.setTarget(dateKey, total);
+      this.closeTargetModal(true);
+    };
+    modal.querySelector('[data-action="save"]').onclick = save;
+    modal.onkeydown = event => { if (event.key === "Enter") { event.preventDefault(); save(); } };
+    window.setTimeout(() => (hoursInput.value ? minutesInput : hoursInput).focus(), 50);
+  }
+
+  closeTargetModal(saved = false) {
+    const modal = this.document.getElementById("targetModal");
+    if (!modal || modal.hidden) return;
+    const { dateKey, asking } = this.targetModalState || {};
+    // skipping the first-visit question is remembered too, so it isn't asked again today
+    if (!saved && asking && dateKey && !(dateKey in this.store.state.dailyTargets)) this.setTarget(dateKey, 0);
+    modal.innerHTML = "";
+    modal.hidden = true;
+    this.targetModalState = null;
+    this.renderFocusSummary();
   }
 
   render() {
@@ -1889,38 +1972,47 @@ class FocusApp {
 
     this.elements.focusSelectedDate.textContent = this.formatTaskDate(activeDate);
     this.elements.focusTotal.textContent = this.duration(totalMilliseconds);
-    const target = this.store.state.dailyTarget;
-    const targetMilliseconds = target?.date === activeDate ? target.milliseconds : 0;
+    const targetMilliseconds = this.targetFor(activeDate);
+    this.elements.focusTargetBtn.textContent = targetMilliseconds ? "Edit target" : "Add target";
+    this.elements.focusTargetBtn.dataset.date = activeDate;
     const progress = targetMilliseconds ? Math.min(100, (totalMilliseconds / targetMilliseconds) * 100) : 0;
-    // Daily target bar, fragmented by category. Segment width = share of the target
-    // (or of the total once the target is exceeded, so the bar never overflows).
     const withTime = totals.filter(category => category.milliseconds > 0);
     const legend = totals.length
       ? `<div class="focus-legend" aria-label="Category colours">${totals.map(category =>
         `<span class="focus-legend-item"><span class="dot" style="background:${this.escape(category.color)}"></span>${this.escape(category.name)}</span>`).join("")}</div>`
       : "";
+    // One bar, fragmented by category. With a target a segment's width is its share of the target (or of the
+    // total once the target is exceeded, so the bar never overflows). Without one, the bar is the whole day:
+    // each segment is that category's share of the time spent.
+    const scale = targetMilliseconds ? Math.max(targetMilliseconds, totalMilliseconds) : totalMilliseconds;
+    const segments = withTime.map(category =>
+      `<span class="focus-goal-segment" style="width:${(category.milliseconds / scale) * 100}%;background:${this.escape(category.color)}" data-name="${this.escape(category.name)}" data-time="${this.escape(this.duration(category.milliseconds))}" data-color="${this.escape(category.color)}"></span>`).join("");
+    let html;
     if (targetMilliseconds) {
-      const scale = Math.max(targetMilliseconds, totalMilliseconds);
-      const segments = withTime.map(category =>
-        `<span class="focus-goal-segment" style="width:${(category.milliseconds / scale) * 100}%;background:${this.escape(category.color)}" data-name="${this.escape(category.name)}" data-time="${this.escape(this.duration(category.milliseconds))}" data-color="${this.escape(category.color)}"></span>`).join("");
-      this.elements.focusProgress.innerHTML = `<div class="focus-goal-label"><span>Daily target</span><span>${this.duration(totalMilliseconds)} / ${this.duration(targetMilliseconds)}</span></div>
+      html = `<div class="focus-goal-label"><span>Daily target</span><span>${this.duration(totalMilliseconds)} / ${this.duration(targetMilliseconds)}</span></div>
         <div class="focus-goal-wrap"><div class="focus-goal-track" role="progressbar" aria-label="Daily focus target progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(progress)}">${segments}</div><div class="focus-goal-tip" hidden></div></div>${legend}`;
-      const wrap = this.elements.focusProgress.querySelector(".focus-goal-wrap");
-      const tip = wrap.querySelector(".focus-goal-tip");
-      wrap.onmousemove = event => {
-        const segment = event.target.closest(".focus-goal-segment");
-        if (!segment) { tip.hidden = true; return; }
-        tip.innerHTML = `<span class="dot" style="background:${segment.dataset.color}"></span><b>${segment.dataset.name}</b> ${segment.dataset.time}`;
-        tip.hidden = false;
-        const box = wrap.getBoundingClientRect();
-        tip.style.left = `${Math.min(Math.max(event.clientX - box.left, tip.offsetWidth / 2), box.width - tip.offsetWidth / 2)}px`;
-      };
-      wrap.onmouseleave = () => { tip.hidden = true; };
+    } else if (totalMilliseconds > 0) {
+      html = `<div class="focus-goal-label"><span>Time by category</span><span>${this.duration(totalMilliseconds)}</span></div>
+        <div class="focus-goal-wrap"><div class="focus-goal-track" role="img" aria-label="Share of focus time by category">${segments}</div><div class="focus-goal-tip" hidden></div></div>${legend}`;
     } else {
-      this.elements.focusProgress.innerHTML = `<div class="focus-goal-empty">No focus target set for this day.</div>${legend}`;
+      html = `<div class="focus-goal-empty">No focus target set for this day.</div>${legend}`;
     }
+    if (html === this.lastSummaryHtml) return;        // runs every second: don't rebuild (and reset the hover tip) for nothing
+    this.lastSummaryHtml = html;
+    this.elements.focusProgress.innerHTML = html;
+    const wrap = this.elements.focusProgress.querySelector(".focus-goal-wrap");
+    if (!wrap) return;
+    const tip = wrap.querySelector(".focus-goal-tip");
+    wrap.onmousemove = event => {
+      const segment = event.target.closest(".focus-goal-segment");
+      if (!segment) { tip.hidden = true; return; }
+      tip.innerHTML = `<span class="dot" style="background:${segment.dataset.color}"></span><b>${segment.dataset.name}</b> ${segment.dataset.time}`;
+      tip.hidden = false;
+      const box = wrap.getBoundingClientRect();
+      tip.style.left = `${Math.min(Math.max(event.clientX - box.left, tip.offsetWidth / 2), box.width - tip.offsetWidth / 2)}px`;
+    };
+    wrap.onmouseleave = () => { tip.hidden = true; };
   }
-
 
   // ---- Analytics widgets ---------------------------------------------------------
   // Built only from parts the page already has: .panel, .panel-title, .focus-total + .focus-label
@@ -2183,6 +2275,7 @@ class FocusApp {
       const week = Math.floor((monthStart.getTime() - firstWeek.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1;
       monthLabels.push(`<span style="grid-column:${week}">${monthStart.toLocaleDateString([], { month: "short" })}</span>`);
     }
+    this.elements.activityCard.style.setProperty("--activity-weeks", String(weekCount));
     this.elements.activityMonths.style.setProperty("--activity-weeks", String(weekCount));
     this.elements.activityGrid.style.setProperty("--activity-weeks", String(weekCount));
     this.elements.activityMonths.innerHTML = monthLabels.join("");
@@ -2191,6 +2284,17 @@ class FocusApp {
       button.onclick = () => this.selectActivityDate(button.dataset.activityDate);
     });
     
+    // when the heatmap is wider than its box (phones), bring the selected day into view, once per selection
+    const scrollKey = `${year}|${this.selectedDate}`;
+    if (scrollKey !== this.activityScrollKey) {
+      this.activityScrollKey = scrollKey;
+      requestAnimationFrame(() => {
+        const box = this.elements.activityGrid.closest(".activity-scroll");
+        const cell = this.elements.activityGrid.querySelector('[aria-pressed="true"]') || this.elements.activityGrid.querySelector('[data-activity-date]:last-of-type');
+        if (box && cell && box.scrollWidth > box.clientWidth) box.scrollLeft = cell.offsetLeft - box.clientWidth / 2;
+      });
+    }
+
     this.elements.activityTrendRange.value = this.selectedActivityRange;
     this.elements.activityTrendRange.onchange = () => {
       this.selectedActivityRange = this.elements.activityTrendRange.value;
@@ -2297,50 +2401,73 @@ class FocusApp {
 
     const activePoints = Object.values(categoryPoints).flat().filter(p => p.milliseconds > 0).length;
     if (activePoints < 2) {
+      this.lastTrendHtml = null;
       this.elements.activityTrendChart.innerHTML = '<p class="focus-trend-empty">Not enough data</p>';
       return;
     }
 
-    // 5. Chart Dimensions
+    // 5. Chart dimensions
     const width = 640;
-    const height = 210;
-    const left = 48;
+    const height = 220;
+    const left = 44;
     const right = 14;
-    const top = 14;
-    const bottom = 35;
+    const top = 16;
+    const bottom = 34;
     const chartWidth = width - left - right;
     const chartHeight = height - top - bottom;
-    
-    const yMax = Math.ceil(maxValue / (60 * 60 * 1000)) * 60 * 60 * 1000 || maxValue;
+    const baseline = top + chartHeight;
+    const HOUR = 60 * 60 * 1000;
+    const yMax = Math.ceil(maxValue / HOUR) * HOUR || maxValue;
 
-    // 6. Generate Polylines
-    const polylines = this.selectedTrendCategories.map(catId => {
+    // 6. Smooth curves (monotone cubic: never dips below zero or overshoots a peak)
+    const curve = pts => {
+      const n = pts.length;
+      if (n < 2) return "";
+      const dx = [], slope = [];
+      for (let i = 0; i < n - 1; i += 1) { dx.push(pts[i + 1].x - pts[i].x); slope.push((pts[i + 1].y - pts[i].y) / dx[i]); }
+      const tangent = [slope[0]];
+      for (let i = 1; i < n - 1; i += 1) tangent.push(slope[i - 1] * slope[i] <= 0 ? 0 : (slope[i - 1] + slope[i]) / 2);
+      tangent.push(slope[n - 2]);
+      for (let i = 0; i < n - 1; i += 1) {
+        if (slope[i] === 0) { tangent[i] = 0; tangent[i + 1] = 0; continue; }
+        const a = tangent[i] / slope[i], b = tangent[i + 1] / slope[i], h = Math.hypot(a, b);
+        if (h > 3) { tangent[i] = 3 * a / h * slope[i]; tangent[i + 1] = 3 * b / h * slope[i]; }
+      }
+      let d = `M${pts[0].x.toFixed(1)},${pts[0].y.toFixed(1)}`;
+      for (let i = 0; i < n - 1; i += 1) {
+        const c = dx[i] / 3;
+        d += ` C${(pts[i].x + c).toFixed(1)},${(pts[i].y + c * tangent[i]).toFixed(1)} ${(pts[i + 1].x - c).toFixed(1)},${(pts[i + 1].y - c * tangent[i + 1]).toFixed(1)} ${pts[i + 1].x.toFixed(1)},${pts[i + 1].y.toFixed(1)}`;
+      }
+      return d;
+    };
+
+    const allPoints = [];
+    const series = this.selectedTrendCategories.map((catId, seriesIndex) => {
       const category = this.store.state.categories.find(c => c.id === catId);
       if (!category) return "";
-
-      const lineColor = this.readableColor(category.color);
+      const color = this.readableColor(category.color);
       const points = categoryPoints[catId].map((point, index) => ({
-        ...point,
         x: left + (index / Math.max(1, categoryPoints[catId].length - 1)) * chartWidth,
-        y: top + chartHeight - (point.milliseconds / yMax) * chartHeight
+        y: baseline - (point.milliseconds / yMax) * chartHeight,
+        ms: point.milliseconds, label: point.label, name: category.name, color
       }));
+      allPoints.push(...points);
+      const line = curve(points);
+      const area = `${line} L${points[points.length - 1].x.toFixed(1)},${baseline} L${points[0].x.toFixed(1)},${baseline} Z`;
+      return `<linearGradient id="trend-fill-${seriesIndex}" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="${color}" stop-opacity=".32"></stop><stop offset="1" stop-color="${color}" stop-opacity="0"></stop></linearGradient>
+        <path class="trend-area" d="${area}" fill="url(#trend-fill-${seriesIndex})"></path>
+        <path class="trend-line" d="${line}" pathLength="1" style="stroke:${color}"></path>`;
+    });
+    // gradients live in <defs>; shapes are drawn after the grid
+    const defs = series.map(markup => markup.match(/<linearGradient[\s\S]*?<\/linearGradient>/)?.[0] || "").join("");
+    const shapes = series.map(markup => markup.replace(/<linearGradient[\s\S]*?<\/linearGradient>/, "")).join("");
 
-      const line = points.map(p => `${p.x},${p.y}`).join(" ");
-      const circles = points.map(p =>
-        `<circle class="trend-point" style="fill: ${lineColor}; stroke: var(--card);" cx="${p.x}" cy="${p.y}" r="3"><title>${this.escape(category.name)} ${this.escape(p.label)}: ${this.escape(this.duration(p.milliseconds))}</title></circle>`
-      ).join("");
-
-      return `
-        <polyline class="trend-line" style="stroke: ${lineColor};" points="${line}"></polyline>
-        ${circles}
-      `;
-    }).join("");
-
-    // 7. Labels & Axes (keep existing logic)
+    // 7. Labels & axes
     const labelIndexes = new Set([0, Math.round((buckets.length - 1) / 4), Math.round((buckets.length - 1) / 2), Math.round((buckets.length - 1) * 3 / 4), buckets.length - 1]);
     const yTicks = [0, yMax / 2, yMax];
     const formatAxisDuration = milliseconds => {
-      const hours = milliseconds / (60 * 60 * 1000);
+      const hours = milliseconds / HOUR;
       if (hours >= 1) return `${Number.isInteger(hours) ? hours : hours.toFixed(1)}h`;
       return `${Math.round(milliseconds / 60000)}m`;
     };
@@ -2353,25 +2480,76 @@ class FocusApp {
           ? anchorDate.toLocaleDateString([], { month: "long", year: "numeric" })
           : String(selectedYear);
 
-    const axis = yTicks.map(value => {
+    const axis = yTicks.map((value, index) => {
       const y = top + chartHeight - (value / yMax) * chartHeight;
-      return `<g class="trend-y-tick"><line x1="${left}" y1="${y}" x2="${width - right}" y2="${y}"></line><text x="${left - 8}" y="${y + 4}" text-anchor="end">${formatAxisDuration(value)}</text></g>`;
+      return `<g class="trend-y-tick${index === 0 ? " is-base" : ""}"><line x1="${left}" y1="${y}" x2="${width - right}" y2="${y}"></line><text x="${left - 10}" y="${y + 3.5}" text-anchor="end">${formatAxisDuration(value)}</text></g>`;
     }).join("");
-    
     const xLabels = buckets.map((bucket, index) => {
       if (!labelIndexes.has(index)) return "";
       const x = left + (index / Math.max(1, buckets.length - 1)) * chartWidth;
-      return `<text class="trend-x-label" x="${x}" y="${height - 12}" text-anchor="middle">${this.escape(bucket.label)}</text>`;
+      return `<text class="trend-x-label" x="${x}" y="${height - 10}" text-anchor="middle">${this.escape(bucket.label)}</text>`;
     }).join("");
+    const dots = allPoints.map(p => `<circle class="trend-point" cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="2.4" style="fill:${p.color}"></circle>`).join("");
 
-    // 8. Render SVG
-    this.elements.activityTrendChart.innerHTML = `
+    // 8. Render. Only redraw (and replay the draw-in animation) when something actually changed.
+    const html = `
       <div class="focus-trend-caption">${rangeLabel} focus time · ${this.escape(periodCaption)}</div>
-      <svg class="focus-trend-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${rangeLabel} focus time trend">
-        ${axis}
-        ${polylines}
-        ${xLabels}
-      </svg>`;
+      <div class="focus-trend-stage">
+        <svg class="focus-trend-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${rangeLabel} focus time trend">
+          <defs>${defs}</defs>
+          ${axis}
+          ${shapes}
+          ${dots}
+          ${xLabels}
+          <line class="trend-guide" x1="0" y1="${top}" x2="0" y2="${baseline}"></line>
+          <g class="trend-hover"><circle class="trend-halo" r="9"></circle><circle class="trend-focus" r="4.5"></circle></g>
+        </svg>
+        <div class="focus-goal-tip trend-tip" hidden></div>
+      </div>`;
+    if (html === this.lastTrendHtml) return;
+    const signature = [this.selectedActivityRange, this.selectedTrendCategories.join(","), this.selectedDate, this.selectedActivityYear].join("|");
+    const animate = signature !== this.lastTrendSignature;
+    this.lastTrendHtml = html;
+    this.lastTrendSignature = signature;
+    const chart = this.elements.activityTrendChart;
+    chart.innerHTML = html;
+    chart.classList.toggle("is-animated", animate);
+    this.bindTrendHover(chart, allPoints, { width, height });
+  }
+
+  // Hover: a guide line and a glowing dot glide to the nearest point; the label reuses the daily-target tip.
+  bindTrendHover(chart, points, { width, height }) {
+    const stage = chart.querySelector(".focus-trend-stage");
+    const svg = chart.querySelector(".focus-trend-svg");
+    const hover = svg.querySelector(".trend-hover");
+    const guide = svg.querySelector(".trend-guide");
+    const tip = chart.querySelector(".trend-tip");
+    const hide = () => { stage.classList.remove("is-hovering"); tip.hidden = true; };
+    svg.onmousemove = event => {
+      const box = svg.getBoundingClientRect();
+      const scale = width / box.width;
+      const mx = (event.clientX - box.left) * scale, my = (event.clientY - box.top) * scale;
+      let best = null, bestDistance = Infinity;
+      points.forEach(point => {
+        const distance = Math.hypot(point.x - mx, (point.y - my) * 0.6);   // a little forgiving vertically
+        if (distance < bestDistance) { best = point; bestDistance = distance; }
+      });
+      if (!best || bestDistance > 40) return hide();
+      const here = points.filter(p => Math.abs(p.x - best.x) < 0.5 && Math.abs(p.y - best.y) < 0.5);
+      hover.style.transform = `translate(${best.x}px, ${best.y}px)`;
+      hover.style.setProperty("--hover-color", best.color);
+      guide.style.transform = `translateX(${best.x}px)`;
+      stage.classList.add("is-hovering");
+      tip.innerHTML = `<span class="trend-tip-when">${this.escape(best.label)}</span>` + here.map(p =>
+        `<span class="trend-tip-row"><span class="dot" style="background:${p.color}"></span><b>${this.escape(p.name)}</b> ${this.escape(this.duration(p.ms))}</span>`).join("");
+      tip.hidden = false;
+      const stageBox = stage.getBoundingClientRect();
+      const px = (best.x / width) * box.width + (box.left - stageBox.left);
+      const py = (best.y / height) * box.height + (box.top - stageBox.top);
+      tip.style.left = `${Math.min(Math.max(px, tip.offsetWidth / 2), stageBox.width - tip.offsetWidth / 2)}px`;
+      tip.style.top = `${Math.max(py - 14, tip.offsetHeight + 4)}px`;
+    };
+    svg.onmouseleave = hide;
   }
 
   focusDurationBetween(startTime, endTime, now = Date.now(), categoryId = null) {
