@@ -433,7 +433,7 @@ body::before {
 }
 
 /* selected tile: one look for the font and background pickers */
-:is(.font-choice, .background-choice).is-active {
+:is(.font-choice, .background-choice, .task-format-option, .task-repeat-day).is-active {
     border-color: var(--text);
     background-color: rgba(255, 255, 255, .16);
 }

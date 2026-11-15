@@ -105,7 +105,7 @@ class FocusApp {
     digital: { wave: "square", step: .11, length: .08, gain: .025, notes: { work: [880, 1174.66, 1568], break: [1568, 1174.66, 880] } }
   };
   // Settings kept in localStorage that a backup carries along with the main state.
-  static BACKUP_PREF_KEYS = ["focus-clock-font", "focus-clock-format", "focus-alert-sound", "focus-background-image", "focus-background-video"];
+  static BACKUP_PREF_KEYS = ["focus-clock-font", "focus-clock-format", "focus-alert-sound", "focus-background-image", "focus-background-video", "focus-auto-pip"];
   static POMODORO_WORK_MS = 25 * 60 * 1000;
   static POMODORO_BREAK_MS = 5 * 60 * 1000;
 
@@ -196,6 +196,8 @@ class FocusApp {
           this.elements.checkinCountdown.textContent = remaining;
         }
       }
+      this.checkReminders(now);
+      this.checkEtaAlarm(now);
       const phaseChanged = this.advancePomodoro(Date.now());
       if (phaseChanged) {
         this.render();
@@ -241,6 +243,7 @@ class FocusApp {
       clockFontChoices: query("#clockFontChoices"),
       clockFormat: query("#clockFormat"),
       alertSound: query("#alertSound"),
+      autoPip: query("#autoPip"),
       alertSoundPreview: query("#alertSoundPreview"),
       exportDataBtn: query("#exportDataBtn"),
       importDataBtn: query("#importDataBtn"),
@@ -338,6 +341,22 @@ class FocusApp {
 
   bindEvents() {
     new ResizeObserver(() => this.fitClock()).observe(this.elements.clock);
+
+    // Auto mini-viewer: leaving the tab/window opens it, coming back closes it again.
+    this.autoPip = localStorage.getItem("focus-auto-pip") !== "off";
+    this.elements.autoPip.checked = this.autoPip;
+    this.elements.autoPip.onchange = () => {
+      this.autoPip = this.elements.autoPip.checked;
+      localStorage.setItem("focus-auto-pip", this.autoPip ? "on" : "off");
+      window.dispatchEvent(new Event("focus-changed"));   // syncs the preference to the cloud
+    };
+    this.document.addEventListener("visibilitychange", () => {
+      if (this.document.hidden) this.autoOpenPip();
+      else this.autoClosePip();
+    });
+    window.addEventListener("blur", () => window.setTimeout(() => { if (!this.document.hasFocus()) this.autoOpenPip(); }, 150));
+    window.addEventListener("focus", () => this.autoClosePip());
+    try { navigator.mediaSession?.setActionHandler("enterpictureinpicture", () => this.autoOpenPip()); } catch { /* not supported */ }
     this.document.addEventListener("pointerdown", () => this.unlockAudio(), { once: true });
     this.document.addEventListener("fullscreenchange", () => this.updateFullscreenButtonState());
     this.document.addEventListener("webkitfullscreenchange", () => this.updateFullscreenButtonState());
@@ -696,6 +715,7 @@ class FocusApp {
       id: "new-task",
       name: "",
       category: this.store.state.categories[0]?.id || "",
+      mode: "countdown",
       priority: "medium",
       date: this.selectedDate || this.today(),
       created: Date.now(),
@@ -1020,14 +1040,33 @@ class FocusApp {
     return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
   }
 
+  // The running task, if it is a countup (no breaks) task.
+  activeCountupTask() {
+    const task = this.store.state.active ? this.store.findTask(this.store.state.active) : null;
+    return task && task.mode === "countup" ? task : null;
+  }
+
+  formatElapsed(milliseconds) {
+    const total = Math.max(0, Math.floor(milliseconds / 1000));
+    const hours = Math.floor(total / 3600);
+    const minutes = String(Math.floor((total % 3600) / 60)).padStart(2, "0");
+    const seconds = String(total % 60).padStart(2, "0");
+    return hours ? `${hours}:${minutes}:${seconds}` : `${minutes}:${seconds}`;
+  }
+
   renderClock() {
     const currentTime = this.clockText();
     const pomodoro = this.store.state.pomodoro;
+    const countup = this.activeCountupTask();
     const timerRunning = Boolean(pomodoro && !pomodoro.paused && this.store.state.active);
 
     this.elements.liveTime.textContent = currentTime;
-    this.elements.liveTime.hidden = !timerRunning;
+    this.elements.liveTime.hidden = !(timerRunning || countup);
 
+    if (countup) {
+      this.elements.clock.textContent = this.formatElapsed(this.taskDuration(countup));
+      return;
+    }
     // The date's visibility is owned by CSS (data-pomodoro-state / data-countdown-state), not set here.
     if (!timerRunning) this.elements.clock.textContent = currentTime;
   }
@@ -1124,13 +1163,21 @@ class FocusApp {
     this.elements.pomodoroReset.disabled = !running;
     this.elements.pomodoroReset.dataset.phase = !running ? "idle" : pomodoro.phase === "break" ? "break" : "work";
     
-    this.elements.centerStage.dataset.pomodoroState = !pomodoro
-      ? "idle"
-      : pomodoro.paused
-        ? "paused"
-        : "running";
+    const countup = this.activeCountupTask();
+    this.elements.centerStage.dataset.pomodoroState = countup
+      ? "running"
+      : !pomodoro
+        ? "idle"
+        : pomodoro.paused
+          ? "paused"
+          : "running";
     
-    if (!running) {
+    if (countup) {
+      // no cycle: just a label, the reset/skip button stays off
+      this.elements.pomodoroReset.disabled = true;
+      this.elements.pomodoroReset.dataset.phase = "work";
+      this.elements.pomodoroPhase.textContent = "Focus";
+    } else if (!running) {
       this.elements.pomodoroPhase.textContent = "Ready to focus";
     }
     if (pomodoro) {
@@ -1702,13 +1749,14 @@ class FocusApp {
 
   removeCategory(id) {
     const category = this.store.state.categories.find(item => item.id === id);
-    if (!category || !window.confirm(`Remove category "${category.name}"?`)) return;
+    if (!category || !window.confirm(`Remove category "${category.name}"? Its tasks will move to "Uncategorized".`)) return;
     this.store.state.categories = this.store.state.categories.filter(item => item.id !== id);
-    const fallback = this.store.state.categories[0]?.id || "";
     this.store.state.tasks.forEach(task => {
-      if (task.category === id) task.category = fallback;
+      if (task.category === id) task.category = "";   // no category
     });
     if (this.selectedCategory === id) this.selectedCategory = "all";
+    if (this.selectedActivityCategory === id) this.selectedActivityCategory = "all";
+    this.selectedTrendCategories = this.selectedTrendCategories.filter(cId => cId !== id);
     this.store.save();
     this.render();
   }
@@ -2633,16 +2681,41 @@ class FocusApp {
     const priority = task.priority || "medium";
     const hasCategory = this.store.state.categories.some(cat => cat.id === task.category);
     const categoryOptions = [
-      hasCategory ? "" : '<option value="" selected>Uncategorized</option>',
       ...this.store.state.categories.map(cat =>
         `<option value="${this.escape(cat.id)}"${cat.id === task.category ? " selected" : ""}>${this.escape(cat.name)}</option>`
-      )
+      ),
+      `<option value=""${hasCategory ? "" : " selected"}>Uncategorized</option>`
     ].join("");
+    const repeat = ["daily", "weekdays", "weekly", "monthly", "yearly", "custom"].includes(task.repeat) ? task.repeat : "";
+    const customRule = repeat === "custom" ? this.repeatRule(task) : { every: 1, unit: "week", days: [] };
+    const [planYear, planMonth, planDay] = (task.date || this.today()).split("-").map(Number);
+    const customDays = customRule.unit === "week" && customRule.days.length ? customRule.days : [new Date(planYear, planMonth - 1, planDay).getDay()];
+    const unitOption = (value, label) => `<option value="${value}"${customRule.unit === value ? " selected" : ""}>${label}</option>`;
+    const dayButtons = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((label, index) =>
+      `<button type="button" class="ui-control task-repeat-day${customDays.includes(index) ? " is-active" : ""}" data-day="${index}" aria-pressed="${customDays.includes(index)}">${label}</button>`).join("");
+    const remindValue = Number.isFinite(task.remindAt) ? this.toLocalInput(task.remindAt) : "";
+    const mode = task.mode === "countup" ? "countup" : "countdown";
+    const formatMarkup = `<div class="task-format" role="group" aria-label="Task format">
+        <span class="task-format-title">Task Format</span>
+        <p class="settings-note task-format-hint">Choose how you want to track this task</p>
+        <div class="task-format-options">
+        <button type="button" class="task-format-option${mode === "countdown" ? " is-active" : ""}" data-mode="countdown" aria-pressed="${mode === "countdown"}">
+          <span class="task-format-head"><strong>Countdown (with breaks)</strong><span class="task-format-badge is-timed">Timed</span></span>
+          <span class="task-format-desc">Set a target duration and work in focused intervals with breaks.</span>
+          <span class="task-format-best">Best for studying, practice and deep work.</span>
+        </button>
+        <button type="button" class="task-format-option${mode === "countup" ? " is-active" : ""}" data-mode="countup" aria-pressed="${mode === "countup"}">
+          <span class="task-format-head"><strong>Countup (no breaks)</strong><span class="task-format-badge is-untimed">Untimed</span></span>
+          <span class="task-format-desc">Track time continuously without a fixed duration or scheduled breaks.</span>
+          <span class="task-format-best">Best for chores, errands and everyday activities.</span>
+        </button>
+        </div>
+      </div>`;
 
     return `<div class="task-detail-head">
         ${isNew ? '' : `<button class="task-detail-check${task.done ? " is-done" : ""}" type="button" data-action="toggle-draft" aria-label="${task.done ? "Mark incomplete" : "Mark complete"}"></button>`}
         <input class="ui-field task-detail-name" type="text" value="${this.escape(task.name)}" aria-label="Task name" autocomplete="off" placeholder="What needs your focus?">
-        ${isNew ? '' : `<button class="task-detail-delete" type="button" data-action="delete" aria-label="Delete task" title="Delete task">
+        ${isNew ? '' : `<button class="ui-button task-detail-delete" type="button" data-action="delete" aria-label="Delete task" title="Delete task">
           <img src="icons/trash.svg" alt="">
         </button>`}
       </div>
@@ -2667,7 +2740,38 @@ class FocusApp {
           <span>Estimated time (min)</span>
           <input type="number" class="ui-field task-detail-estimate" min="1" max="1440" step="1" inputmode="numeric" placeholder="None" value="${estimateMinutes}">
         </label>
+        <label class="task-detail-field">
+          <span>Repeat</span>
+          <select class="ui-control task-detail-repeat">
+            <option value=""${repeat === "" ? " selected" : ""}>Does not repeat</option>
+            <option value="daily"${repeat === "daily" ? " selected" : ""}>Every day</option>
+            <option value="weekdays"${repeat === "weekdays" ? " selected" : ""}>Every weekday</option>
+            <option value="weekly"${repeat === "weekly" ? " selected" : ""}>Every week</option>
+            <option value="monthly"${repeat === "monthly" ? " selected" : ""}>Every month</option>
+            <option value="yearly"${repeat === "yearly" ? " selected" : ""}>Every year</option>
+            <option value="custom"${repeat === "custom" ? " selected" : ""}>Custom...</option>
+          </select>
+        </label>
+        <label class="task-detail-field">
+          <span>Reminder</span>
+          <input type="datetime-local" class="ui-field task-detail-remind" value="${remindValue}">
+        </label>
+        <div class="task-repeat-custom" hidden>
+          <div class="task-repeat-every">
+            <span>Repeat every</span>
+            <input type="number" class="ui-field task-repeat-interval" min="1" max="99" step="1" inputmode="numeric" value="${customRule.every}" aria-label="Repeat interval">
+            <select class="ui-control task-repeat-unit" aria-label="Repeat unit">
+              ${unitOption("day", "days")}${unitOption("week", "weeks")}${unitOption("month", "months")}${unitOption("year", "years")}
+            </select>
+          </div>
+          <div class="task-repeat-days" role="group" aria-label="Repeat on these days">${dayButtons}</div>
+          <label class="task-detail-field">
+            <span>Ends on (optional)</span>
+            <input type="date" class="ui-field task-repeat-until" value="${customRule.until || ""}">
+          </label>
+        </div>
       </div>
+      ${formatMarkup}
 
       ${isNew ? '' : `
       <dl class="task-properties task-meta">
@@ -2780,6 +2884,38 @@ class FocusApp {
     const task = isNew ? null : this.store.findTask(taskId);
     if (!isNew && !task) return;
 
+    details.querySelectorAll(".task-format-option").forEach(option => {
+      option.onclick = e => {
+        e.preventDefault();
+        e.stopPropagation();
+        details.querySelectorAll(".task-format-option").forEach(other => {
+          const on = other === option;
+          other.classList.toggle("is-active", on);
+          other.setAttribute("aria-pressed", String(on));
+        });
+      };
+    });
+
+    const repeatSelect = details.querySelector(".task-detail-repeat");
+    const customPanel = details.querySelector(".task-repeat-custom");
+    const unitSelect = details.querySelector(".task-repeat-unit");
+    const daysRow = details.querySelector(".task-repeat-days");
+    const syncRepeat = () => {
+      customPanel.hidden = repeatSelect.value !== "custom";
+      daysRow.hidden = unitSelect.value !== "week";
+    };
+    repeatSelect.onchange = syncRepeat;
+    unitSelect.onchange = syncRepeat;
+    syncRepeat();
+    details.querySelectorAll(".task-repeat-day").forEach(button => {
+      button.onclick = e => {
+        e.preventDefault();
+        e.stopPropagation();
+        const on = button.classList.toggle("is-active");
+        button.setAttribute("aria-pressed", String(on));
+      };
+    });
+
     const check = details.querySelector('[data-action="toggle-draft"]');
     if (check) {
       check.onclick = (e) => {
@@ -2828,12 +2964,30 @@ class FocusApp {
           ? Math.min(1440, Math.round(estimateMinutes)) * 60 * 1000
           : undefined;
 
+        const newMode = details.querySelector(".task-format-option.is-active")?.dataset.mode === "countup" ? "countup" : "countdown";
+        const newRepeat = details.querySelector(".task-detail-repeat").value;
+        const ruleUnit = details.querySelector(".task-repeat-unit").value;
+        const ruleUntil = details.querySelector(".task-repeat-until").value;
+        const newRule = {
+          every: Math.max(1, Math.min(99, Math.round(Number(details.querySelector(".task-repeat-interval").value)) || 1)),
+          unit: ruleUnit,
+          days: ruleUnit === "week" ? [...details.querySelectorAll(".task-repeat-day.is-active")].map(button => Number(button.dataset.day)) : [],
+          until: this.isDateKey(ruleUntil) ? ruleUntil : undefined
+        };
+        const remindMs = details.querySelector(".task-detail-remind").value ? new Date(details.querySelector(".task-detail-remind").value).getTime() : NaN;
+        const newRemindAt = Number.isFinite(remindMs) ? remindMs : undefined;
+        if (newRemindAt) this.ensureNotifyPermission();
+
         if (isNew) {
           // Create new task
           this.store.addTask({
             id: crypto.randomUUID(),
             name: newName,
             category: newCategory,
+            mode: newMode,
+            repeat: newRepeat || undefined,
+            repeatRule: newRepeat === "custom" ? newRule : undefined,
+            remindAt: newRemindAt,
             priority: newPriority,
             date: this.isDateKey(newDate) ? newDate : this.today(),
             created: Date.now(),
@@ -2843,11 +2997,18 @@ class FocusApp {
           });
         } else {
           // Update existing task
+          if ((task.mode || "countdown") !== newMode && this.store.state.active === task.id) this.stopTask(false);   // the timer style changes, so stop the running one
+          task.mode = newMode;
+          if (newRepeat) task.repeat = newRepeat; else delete task.repeat;
+          if (newRepeat === "custom") task.repeatRule = newRule; else delete task.repeatRule;
+          if (newRemindAt !== task.remindAt) delete task.reminded;
+          if (newRemindAt) task.remindAt = newRemindAt; else delete task.remindAt;
           task.name = newName;
           if (this.isDateKey(newDate)) task.date = newDate;
           task.category = newCategory;
           task.priority = newPriority;
           if (newEstimateMs) {
+            if (task.estimateMs !== newEstimateMs) delete task.etaAlarmed;
             task.estimateMs = newEstimateMs;
             delete task.estimateSkipped;
           } else {
@@ -2959,6 +3120,7 @@ class FocusApp {
 
   startTask(id) {
     this.closeFocusTasks();   // the popout would otherwise sit on top of the start countdown
+    this.ensureNotifyPermission();
     const task = this.store.findTask(id);
     if (!task) return;
     if (this.store.state.active === id) return;
@@ -2996,6 +3158,7 @@ class FocusApp {
     this.closeEtaPrompt();
     if (!task) return;
     if (minutes) {
+      if (task.estimateMs !== minutes * 60 * 1000) delete task.etaAlarmed;
       task.estimateMs = minutes * 60 * 1000;
       delete task.estimateSkipped;
     } else {
@@ -3014,6 +3177,7 @@ class FocusApp {
     if (!Number.isFinite(estimate) || estimate <= 0) return null;
     let remaining = estimate - this.taskDuration(task, now);
     if (remaining <= 0) return null;
+    if (task.mode === "countup") return now + remaining;   // no breaks to add
     const focusMs = this.focusDurationMs();
     const breakMs = this.breakDurationMs();
     let time = now;
@@ -3093,6 +3257,7 @@ class FocusApp {
     const focusedMs = this.taskDuration(task);
     const estimateMs = Number.isFinite(task.estimateMs) && task.estimateMs > 0 ? task.estimateMs : null;
     const streak = this.bumpStreak();
+    this.spawnRecurrence(task);
 
     let reward = null;
     let note = "";
@@ -3247,8 +3412,12 @@ class FocusApp {
     const task = this.store.findTask(id);
     if (!task) return;
     this.ensureTaskSessions(task);
-    const startsPomodoro = !this.store.state.pomodoro;
-    if (startsPomodoro) {
+    const isCountup = task.mode === "countup";
+    if (isCountup) this.store.state.pomodoro = null;   // countup tasks have no focus/break cycle
+    const startsPomodoro = !isCountup && !this.store.state.pomodoro;
+    if (isCountup) {
+      // nothing to set up: time just runs up
+    } else if (startsPomodoro) {
       const phaseDurationMs = this.focusDurationMs();
       this.store.state.pomodoro = {
         phase: "work",
@@ -3263,7 +3432,7 @@ class FocusApp {
       task.accumulatedMs = task.start ? this.elapsed(task.start, task.end || now) : 0;
     }
     task.start = new Date(now).toISOString();
-    task.end = this.store.state.pomodoro.phase === "break" ? task.start : undefined;
+    task.end = this.store.state.pomodoro?.phase === "break" ? task.start : undefined;
     this.store.state.active = id;
     this.store.save();
     if (startsPomodoro) this.playPhaseSound("work");
@@ -3535,22 +3704,219 @@ class FocusApp {
     this.elements.focusTasksToggle.setAttribute("aria-expanded", "false");
   }
 
+  /* --- Recurring tasks ---------------------------------------------------------------------- */
+
+  repeatRule(task) {
+    switch (task.repeat) {
+      case "daily": return { every: 1, unit: "day", days: [] };
+      case "weekdays": return { every: 1, unit: "week", days: [1, 2, 3, 4, 5] };
+      case "weekly": return { every: 1, unit: "week", days: [] };
+      case "monthly": return { every: 1, unit: "month", days: [] };
+      case "yearly": return { every: 1, unit: "year", days: [] };
+      case "custom": {
+        const rule = task.repeatRule || {};
+        return {
+          every: Math.max(1, Math.min(99, Math.round(Number(rule.every)) || 1)),
+          unit: ["day", "week", "month", "year"].includes(rule.unit) ? rule.unit : "day",
+          days: Array.isArray(rule.days) ? rule.days.filter(day => day >= 0 && day <= 6) : [],
+          until: this.isDateKey(rule.until) ? rule.until : undefined
+        };
+      }
+      default: return null;
+    }
+  }
+
+  // Next planned date after this task's date (and after today, so a late task doesn't pile up).
+  // Returns null when the repeat has ended.
+  nextRecurrenceDate(task) {
+    const rule = this.repeatRule(task);
+    if (!rule) return null;
+    const [year, month, day] = (task.date || this.today()).split("-").map(Number);
+    const today = this.today();
+    const anchor = new Date(year, month - 1, day);
+    const dayNumber = value => Math.floor(Date.UTC(value.getFullYear(), value.getMonth(), value.getDate()) / 86400000);
+    const weekIndex = value => Math.floor((dayNumber(value) + 3) / 7);   // weeks start on Monday
+    let date = new Date(anchor);
+    const step = () => {
+      if (rule.unit === "day") {
+        date = new Date(date.getFullYear(), date.getMonth(), date.getDate() + rule.every);
+      } else if (rule.unit === "week") {
+        const days = rule.days.length ? rule.days : [anchor.getDay()];
+        const cursor = new Date(date);
+        for (let guard = 0; guard < 7 * rule.every + 7; guard += 1) {
+          cursor.setDate(cursor.getDate() + 1);
+          if (days.includes(cursor.getDay()) && (weekIndex(cursor) - weekIndex(anchor)) % rule.every === 0) break;
+        }
+        date = cursor;
+      } else if (rule.unit === "month") {
+        const first = new Date(date.getFullYear(), date.getMonth() + rule.every, 1);
+        date = new Date(first.getFullYear(), first.getMonth(), Math.min(day, new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate()));
+      } else {
+        const target = date.getFullYear() + rule.every;
+        date = new Date(target, month - 1, Math.min(day, new Date(target, month, 0).getDate()));
+      }
+    };
+    step();
+    for (let guard = 0; this.dateKey(date) <= today && guard < 800; guard += 1) step();
+    if (rule.until && this.dateKey(date) > rule.until) return null;
+    return date;
+  }
+
+  // Completing a repeating task schedules its next occurrence (once, even if it is un-ticked and ticked again).
+  spawnRecurrence(task) {
+    if (!task.repeat || task.recurred) return;
+    task.recurred = true;
+    const nextDate = this.nextRecurrenceDate(task);
+    if (!nextDate) return;                                        // the repeat has ended
+    const next = {
+      id: crypto.randomUUID(),
+      name: task.name,
+      category: task.category,
+      mode: task.mode === "countup" ? "countup" : "countdown",
+      priority: task.priority || "medium",
+      date: this.dateKey(nextDate),
+      created: Date.now(),
+      sessions: [],
+      done: false,
+      repeat: task.repeat
+    };
+    if (task.repeatRule) next.repeatRule = JSON.parse(JSON.stringify(task.repeatRule));
+    if (Number.isFinite(task.estimateMs) && task.estimateMs > 0) next.estimateMs = task.estimateMs;
+    else if (task.estimateSkipped) next.estimateSkipped = true;
+    if (Number.isFinite(task.remindAt)) {
+      const [year, month, day] = (task.date || this.today()).split("-").map(Number);
+      const days = Math.round((nextDate - new Date(year, month - 1, day)) / 86400000);
+      const remind = new Date(task.remindAt);
+      remind.setDate(remind.getDate() + days);
+      next.remindAt = remind.getTime();
+    }
+    this.store.state.tasks.push(next);
+  }
+
+  /* --- Reminders, ETA alarm and toasts ------------------------------------------------------- */
+
+  toLocalInput(ms) {
+    const d = new Date(ms);
+    const p = n => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+  }
+
+  ensureNotifyPermission() {
+    try {
+      if ("Notification" in window && Notification.permission === "default") Notification.requestPermission();
+    } catch { /* unsupported */ }
+  }
+
+  checkReminders(now) {
+    let changed = false;
+    this.store.state.tasks.forEach(task => {
+      if (!Number.isFinite(task.remindAt) || task.reminded || task.done || task.remindAt > now) return;
+      task.reminded = true;
+      changed = true;
+      if (now - task.remindAt > 12 * 3600 * 1000) return;          // long gone (app was closed): don't ring for it
+      this.notify({ title: "Reminder", body: task.name, taskId: task.id });
+    });
+    if (changed) this.store.save();
+  }
+
+  // The alarm goes off when the focused time reaches the estimate (that is the moment the ETA shows).
+  checkEtaAlarm(now) {
+    const task = this.store.state.active ? this.store.findTask(this.store.state.active) : null;
+    if (!task || task.done || task.etaAlarmed) return;
+    const estimate = task.estimateMs;
+    if (!(estimate > 0) || this.store.state.pomodoro?.phase === "break") return;
+    if (this.taskDuration(task, now) < estimate) return;
+    task.etaAlarmed = true;
+    this.store.save();
+    this.notify({ title: "Time's up", body: `You reached your ${this.shortDuration(estimate)} estimate for "${task.name}"`, taskId: task.id, alarm: true });
+  }
+
+  notify({ title, body, taskId = null, alarm = false }) {
+    this.showToast({ title, body, taskId, alarm });
+    try {
+      if ("Notification" in window && Notification.permission === "granted") {
+        const note = new Notification(title, { body, tag: `downpour-${taskId || title}`, requireInteraction: alarm });
+        note.onclick = () => { window.focus(); note.close(); };
+      }
+    } catch { /* some mobile browsers need a service worker */ }
+    if (alarm) this.startAlarm();
+    else this.playPhaseSound("work");
+  }
+
+  showToast({ title, body, taskId, alarm }) {
+    let host = this.document.getElementById("toastHost");
+    if (!host) {
+      host = this.document.createElement("div");
+      host.id = "toastHost";
+      host.className = "toast-host";
+      host.setAttribute("aria-live", "assertive");
+      this.document.body.appendChild(host);
+    }
+    const toast = this.document.createElement("div");
+    toast.className = `toast${alarm ? " is-alarm" : ""}`;
+    if (alarm) toast.dataset.alarm = "1";
+    const buttons = alarm
+      ? '<button class="ui-control" type="button" data-toast="extend">+5 min</button><button class="ui-control" type="button" data-toast="dismiss">Stop alarm</button>'
+      : `${taskId ? '<button class="ui-control" type="button" data-toast="start">Start</button><button class="ui-control" type="button" data-toast="snooze">Snooze 5m</button>' : ""}<button class="ui-control" type="button" data-toast="dismiss">Dismiss</button>`;
+    toast.innerHTML = `<div class="toast-text"><strong>${this.escape(title)}</strong><span>${this.escape(body)}</span></div><div class="toast-actions">${buttons}</div>`;
+    toast.onclick = event => {
+      const action = event.target.closest("[data-toast]")?.dataset.toast;
+      if (!action) return;
+      const task = taskId ? this.store.findTask(taskId) : null;
+      if (action === "start" && task) this.startTask(task.id);
+      if (action === "snooze" && task) { task.remindAt = Date.now() + 5 * 60000; delete task.reminded; this.store.save(); }
+      if (action === "extend" && task) { task.estimateMs = (task.estimateMs || 0) + 5 * 60000; delete task.etaAlarmed; this.store.save(); this.render(); }
+      if (alarm) this.stopAlarm();
+      toast.remove();
+    };
+    host.appendChild(toast);
+  }
+
+  startAlarm() {
+    this.stopAlarm();
+    let rings = 0;
+    const ring = () => {
+      if (rings >= 15) return this.stopAlarm();
+      rings += 1;
+      this.playPhaseSound("work");
+    };
+    ring();
+    this.alarmTimer = window.setInterval(ring, 2500);
+  }
+
+  stopAlarm() {
+    window.clearInterval(this.alarmTimer);
+    this.alarmTimer = null;
+  }
+
+  /* --- Auto mini-viewer when the user leaves the tab or window --------------------------------- */
+
+  autoOpenPip() {
+    if (!this.autoPip || !window.documentPictureInPicture || window.documentPictureInPicture.window) return;
+    if (!this.store.state.active || !this.store.findTask(this.store.state.active)) return;   // nothing running: nothing to show
+    this.toggleDocumentPiP(true);
+  }
+
+  autoClosePip() {
+    if (this.autoPipOpened) window.documentPictureInPicture?.window?.close();
+  }
+
   setPipButtonState(isOpen) {
     const button = this.elements.pomodoroPipButton;
     button.setAttribute("aria-pressed", String(isOpen));
     button.setAttribute("aria-label", isOpen ? "Exit picture in picture" : "Enter picture in picture");
   }
 
-  async toggleDocumentPiP() {
+  async toggleDocumentPiP(auto = false) {
     if (!window.documentPictureInPicture) {
-      alert("Document Picture-in-Picture is not supported in your browser.");
+      if (!auto) alert("Document Picture-in-Picture is not supported in your browser.");
       return;
     }
 
     const centerStage = this.elements.centerStage;
 
     if (window.documentPictureInPicture.window) {
-      window.documentPictureInPicture.window.close();
+      if (!auto) window.documentPictureInPicture.window.close();
       return;
     }
 
@@ -3602,6 +3968,7 @@ class FocusApp {
       pipDocument.body.classList.add("is-pip");
       pipDocument.body.appendChild(centerStage);
       this.setPipButtonState(true);
+      this.autoPipOpened = auto;
 
       // 3. The page's own click/Escape listeners don't see this window, so the tasks
       //    popout needs its own: Escape or a click outside it closes it.
@@ -3625,11 +3992,12 @@ class FocusApp {
         }
         this.closeFocusTasks();
         this.setPipButtonState(false);
+        this.autoPipOpened = false;
         this.render();
       }, { once: true });
 
     } catch (err) {
-      console.error("Failed to open PiP:", err);
+      if (!auto) console.error("Failed to open PiP:", err);   // auto mode: browsers may refuse without a user gesture
     }
   }
 }

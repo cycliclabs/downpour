@@ -3,7 +3,7 @@ const SUPABASE_URL = "https://btpzahserhjlzdmhgjvp.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_gCDBQujMFh7TLaKhtGIyng_MlK-wkXI";  // Project Settings -> API -> anon public key
 
 class CloudSync {
-  static PREF_KEYS = ["focus-clock-font", "focus-clock-format", "focus-alert-sound", "focus-background-image", "focus-background-video"];
+  static PREF_KEYS = ["focus-clock-font", "focus-clock-format", "focus-alert-sound", "focus-background-image", "focus-background-video", "focus-auto-pip"];
   static USERNAME_RE = /^[A-Za-z0-9_]{3,20}$/;
   static LOCAL_AT = "focus-local-at";
   static EXCLUDE = ["active", "pomodoro"]; // per-device, never synced
