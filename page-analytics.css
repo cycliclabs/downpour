@@ -903,3 +903,20 @@ button.activity-cell[aria-pressed="true"] {
         min-height: 0;
     }
 }
+
+/* Domain / line chips above the activity heatmap and the trend chart (look: .ui-control + the shared selected tile) */
+.domain-chips {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 12px;
+}
+
+.domain-chips:empty {
+    display: none;
+}
+
+.domain-chip .dot {
+    flex: none;
+}

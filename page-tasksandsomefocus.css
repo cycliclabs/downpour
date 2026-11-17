@@ -829,3 +829,15 @@
         grid-template-columns: repeat(4, minmax(0, 1fr));
     }
 }
+
+/* --- Targets and limits: hours + minutes side by side --- */
+.target-inputs {
+    display: flex;
+    gap: 6px;
+}
+
+.target-inputs input {
+    flex: 1;
+    min-width: 0;
+    text-align: center;
+}

@@ -3,20 +3,43 @@ class FocusStore {
 
   static defaultState() {
     return {
-      categories: [
-        { id: "school", name: "School", color: "#6c63ff" },
-        { id: "coding", name: "Coding", color: "#19a974" },
-        { id: "hobby", name: "Hobby", color: "#f59e0b" }
-      ],
+      categories: FocusApp.SEED_CATEGORIES.map(category => JSON.parse(JSON.stringify(category))),
+      domainsSeeded: true,                       // the starter categories were added (once)
+      trackedEntries: [],                        // automatic app / website time: { id, source: "app"|"web", key, start, end, category? }
       tasks: [],
       active: null,
       brainDump: "",
-      dailyTargets: {},                          // { "YYYY-MM-DD": milliseconds }; 0 = skipped that day
+      dailyTargets: {},                          // { "YYYY-MM-DD": { work, life, entertainment (a limit), hobbies } in ms }; {} = skipped that day
       pomodoro: null,
       pomodoroSettings: { focusMinutes: 25, breakMinutes: 5 },
       raindrops: 0,                              // currency earned by completing tasks (see FocusApp.RAINDROPS)
       streak: { count: 0, lastDate: null }       // consecutive days with at least one completed task
     };
+  }
+
+  // Brings any saved state (older versions, backups, cloud copies) to the current shape.
+  static migrate(state) {
+    const domains = new Set(FocusApp.DOMAINS.map(domain => domain.id));
+    const legacy = { school: "work", coding: "work", hobby: "hobbies" };
+    state.categories = (Array.isArray(state.categories) ? state.categories : []).map(category => ({
+      ...category,
+      domain: domains.has(category.domain) ? category.domain : (legacy[category.id] || "work")
+    }));
+    if (!state.domainsSeeded) {
+      FocusApp.SEED_CATEGORIES.forEach(seed => {
+        const taken = state.categories.some(category => category.id === seed.id || category.name.trim().toLowerCase() === seed.name.toLowerCase());
+        if (!taken) state.categories.push(JSON.parse(JSON.stringify(seed)));
+      });
+      state.domainsSeeded = true;
+    }
+    // targets used to be one number per day (the work target); they are now one number per domain
+    const targets = {};
+    Object.entries(state.dailyTargets && typeof state.dailyTargets === "object" ? state.dailyTargets : {}).forEach(([date, value]) => {
+      targets[date] = value && typeof value === "object" ? value : (Number(value) > 0 ? { work: Number(value) } : {});
+    });
+    state.dailyTargets = targets;
+    if (!Array.isArray(state.trackedEntries)) state.trackedEntries = [];
+    return state;
   }
 
   constructor() {
@@ -26,7 +49,7 @@ class FocusStore {
   load() {
     const stored = localStorage.getItem(FocusStore.KEY);
     const defaults = FocusStore.defaultState();
-    if (!stored) return defaults;
+    if (!stored) return FocusStore.migrate(defaults);
 
     const saved = JSON.parse(stored);
     const savedPomodoroSettings = saved.pomodoroSettings && typeof saved.pomodoroSettings === "object"
@@ -36,13 +59,14 @@ class FocusStore {
     const dailyTargets = { ...(saved.dailyTargets && typeof saved.dailyTargets === "object" ? saved.dailyTargets : {}) };
     if (saved.dailyTarget?.date && !(saved.dailyTarget.date in dailyTargets)) dailyTargets[saved.dailyTarget.date] = Number(saved.dailyTarget.milliseconds) || 0;
     delete saved.dailyTarget;
-    return {
+    return FocusStore.migrate({
       ...defaults,
       ...saved,
+      domainsSeeded: saved.domainsSeeded === true,
       dailyTargets,
       pomodoroSettings: { ...defaults.pomodoroSettings, ...savedPomodoroSettings },
       streak: { ...defaults.streak, ...(saved.streak && typeof saved.streak === "object" ? saved.streak : {}) }
-    };
+    });
   }
 
   save() {
@@ -96,6 +120,43 @@ class FocusApp {
   //   ratio > onTargetBand[1]        slower than estimated  -> `slower`
   // A task needs an estimate and at least `minFocusMs` of focus to pay out, and pays out once.
   static RAINDROPS = { base: 10, faster: 12, slower: 8, onTargetBand: [0.9, 1.1], minFocusMs: 60 * 1000 };
+  // Domains: the fixed top level of every category. They cannot be added, renamed or removed; categories live inside them.
+  //   goal    "target": aim to reach it.  "limit": aim to stay under it.
+  //   format  the task format a new task in this domain starts with (the task editor can still change it)
+  //   rewards whether finishing a task here pays raindrops and counts for the streak
+  static DOMAINS = [
+    { id: "work", name: "Work", color: "#6c8cff", goal: "target", format: "countdown", rewards: true },
+    { id: "life", name: "Life", color: "#2dd4bf", goal: "target", format: "countup", rewards: true },
+    { id: "entertainment", name: "Entertainment", color: "#f472b6", goal: "limit", format: "countup", rewards: false },
+    { id: "hobbies", name: "Hobbies", color: "#fbbf24", goal: "target", format: "countdown", rewards: true }
+  ];
+  // Categories every account starts with (added once to existing accounts too). `match` is for automatic app / website
+  // tracking: an entry reported for one of these apps or sites lands in the category (see categoryForSignal).
+  static SEED_CATEGORIES = [
+    { id: "school", name: "School", color: "#6c63ff", domain: "work" },
+    { id: "coding", name: "Coding", color: "#19a974", domain: "work" },
+    { id: "professional", name: "Professional", color: "#3b82f6", domain: "work" },
+    { id: "admin", name: "Admin", color: "#94a3b8", domain: "work" },
+    { id: "chores", name: "Chores", color: "#14b8a6", domain: "life" },
+    { id: "cleaning", name: "Cleaning", color: "#22d3ee", domain: "life" },
+    { id: "eating", name: "Eating", color: "#f97316", domain: "life" },
+    { id: "sleep", name: "Sleep", color: "#818cf8", domain: "life" },
+    { id: "exercise", name: "Exercise", color: "#22c55e", domain: "life" },
+    { id: "errands", name: "Errands", color: "#eab308", domain: "life" },
+    { id: "commute", name: "Commute", color: "#64748b", domain: "life" },
+    { id: "youtube", name: "YouTube", color: "#ef4444", domain: "entertainment", match: { sites: ["youtube.com", "youtu.be"], apps: [] } },
+    { id: "instagram", name: "Instagram", color: "#ec4899", domain: "entertainment", match: { sites: ["instagram.com"], apps: ["Instagram"] } },
+    { id: "netflix", name: "Netflix", color: "#b91c1c", domain: "entertainment", match: { sites: ["netflix.com"], apps: ["Netflix"] } },
+    { id: "minecraft", name: "Minecraft", color: "#4ade80", domain: "entertainment", match: { sites: [], apps: ["Minecraft"] } },
+    { id: "gaming", name: "Gaming", color: "#a855f7", domain: "entertainment", match: { sites: [], apps: [] } },
+    { id: "browsing", name: "Browsing", color: "#fb7185", domain: "entertainment", match: { sites: [], apps: [] } },
+    { id: "hobby", name: "Hobby", color: "#f59e0b", domain: "hobbies" },
+    { id: "reading", name: "Reading", color: "#d97706", domain: "hobbies" },
+    { id: "music", name: "Music", color: "#e879f9", domain: "hobbies" },
+    { id: "drawing", name: "Drawing", color: "#fb923c", domain: "hobbies" },
+    { id: "cooking", name: "Cooking", color: "#facc15", domain: "hobbies" }
+  ];
+  static MAX_TREND_LINES = 6;
   static ETA_PRESETS = [15, 25, 45, 60, 90, 120];   // minutes offered when a task is started
   static CELEBRATION_MS = 6000;
   // Alert sounds, played when a focus/break phase starts (settings > Clock and Timer). Synthesised, no files.
@@ -170,6 +231,7 @@ class FocusApp {
       const isActivelyFocusing = this.store.state.active && 
                                  !this.store.state.pomodoro?.paused && 
                                  this.store.state.pomodoro?.phase !== "break" && 
+                                 !this.activeCountupTask() &&   // countup tasks never ask "Are you still here?"
                                  !this.checkInActive &&
                                  !this.countdown; // Don't count during the 3-2-1 countdown
 
@@ -235,6 +297,10 @@ class FocusApp {
       backgroundUploadInput: query("#backgroundUploadInput"),
       backgroundUploadStatus: query("#backgroundUploadStatus"),
       newCategoryName: query("#newCategoryName"),
+      newCategoryDomain: query("#newCategoryDomain"),
+      activityDomainChips: query("#activityDomainChips"),
+      trendModeChips: query("#trendModeChips"),
+      trendSeriesChips: query("#trendSeriesChips"),
       analyticsWidgets: query("#analyticsWidgets"),
       backgroundVideoUrl: query("#backgroundVideoUrl"),
       backgroundVideoBtn: query("#backgroundVideoBtn"),
@@ -319,10 +385,6 @@ class FocusApp {
       musicClose: query("#musicClose"),
 
       activityCategoryFilter: query("#activityCategoryFilter"),
-      trendMultiSelect: query("#trendMultiSelect"),
-      trendMultiBtn: query("#trendMultiBtn"),
-      trendMultiCount: query("#trendMultiCount"),
-      trendMultiContent: query("#trendMultiContent"),
     };
   }
 
@@ -427,11 +489,6 @@ class FocusApp {
       this.renderActivityCalendar();
     };
 
-    // Trend Multi-select Dropdown
-    this.elements.trendMultiBtn.onclick = (e) => {
-      e.stopPropagation();
-      this.elements.trendMultiSelect.classList.toggle("is-open");
-    };
 
 
     this.document.addEventListener("keydown", event => {
@@ -474,10 +531,6 @@ class FocusApp {
         if (!this.elements.focusMusicPanel.contains(event.target)) {
           this.collapseMusicPanel();
         }
-      }
-
-      if (this.elements.trendMultiSelect.classList.contains("is-open") && !this.elements.trendMultiSelect.contains(event.target)) {
-        this.elements.trendMultiSelect.classList.remove("is-open");
       }
 
       // Close Tasks Dropdown
@@ -705,6 +758,14 @@ class FocusApp {
     this.render(); 
   }
 
+  // A new task starts in whatever the category filter is showing (its first category when a whole domain is shown).
+  defaultCategoryForNewTask() {
+    const filter = this.selectedCategory;
+    if (filter && filter !== "all" && !filter.startsWith("d:") && this.categoryOf(filter)) return filter;
+    const domainId = filter?.startsWith("d:") ? filter.slice(2) : "";
+    return (this.store.state.categories.find(category => category.domain === (domainId || "work")) || this.store.state.categories[0])?.id || "";
+  }
+
   openNewTaskModal() {
     this.closeTaskModal(); // Ensure any open task is closed
     
@@ -714,8 +775,8 @@ class FocusApp {
     const dummyTask = {
       id: "new-task",
       name: "",
-      category: this.store.state.categories[0]?.id || "",
-      mode: "countdown",
+      category: this.defaultCategoryForNewTask(),
+      mode: this.domainInfo(this.domainIdOfCategory(this.defaultCategoryForNewTask()))?.format || "countdown",
       priority: "medium",
       date: this.selectedDate || this.today(),
       created: Date.now(),
@@ -772,14 +833,99 @@ class FocusApp {
     this.elements.focusMusicToggle.title = "Focus Music";
   }
 
-  // ---- Daily target -------------------------------------------------------------
-  targetFor(dateKey) {
-    return Number(this.store.state.dailyTargets?.[dateKey]) || 0;
+  // ---- Domains and time entries -------------------------------------------------
+  domainInfo(id) { return FocusApp.DOMAINS.find(domain => domain.id === id) || null; }
+  categoryOf(id) { return this.store.state.categories.find(category => category.id === id) || null; }
+  domainIdOfCategory(id) { return this.categoryOf(id)?.domain || ""; }
+  domainIdOfTask(task) { return this.domainIdOfCategory(task.category); }
+
+  // Filter values: "all", "d:<domain id>" (a whole domain) or a category id.
+  matchesFilter(categoryId, filter) {
+    if (!filter || filter === "all") return true;
+    if (filter.startsWith("d:")) return this.domainIdOfCategory(categoryId) === filter.slice(2);
+    return categoryId === filter;
   }
 
-  setTarget(dateKey, milliseconds) {
-    this.store.state.dailyTargets = { ...this.store.state.dailyTargets, [dateKey]: Math.max(0, Math.round(milliseconds)) };
+  // Trend series keys: "d:<domain id>" or "c:<category id>".
+  seriesMatches(categoryId, key) {
+    if (!key) return true;
+    if (key.startsWith("d:")) return this.domainIdOfCategory(categoryId) === key.slice(2);
+    if (key.startsWith("c:")) return categoryId === key.slice(2);
+    return categoryId === key;
+  }
+
+  seriesInfo(key) {
+    if (key.startsWith("d:")) {
+      const domain = this.domainInfo(key.slice(2));
+      return domain ? { name: domain.name, color: domain.color } : null;
+    }
+    const category = this.categoryOf(key.startsWith("c:") ? key.slice(2) : key);
+    return category ? { name: category.name, color: category.color } : null;
+  }
+
+  // <optgroup> list of every domain with its categories, for the filters. `suffix(filterValue)` adds e.g. a count.
+  groupedFilterOptions(allLabel, suffix = () => "") {
+    const options = [`<option value="all">${this.escape(allLabel)}${suffix("all")}</option>`];
+    FocusApp.DOMAINS.forEach(domain => {
+      const categories = this.store.state.categories.filter(category => category.domain === domain.id);
+      if (!categories.length) return;
+      options.push(`<optgroup label="${this.escape(domain.name)}"><option value="d:${domain.id}">All ${this.escape(domain.name)}${suffix(`d:${domain.id}`)}</option>${
+        categories.map(category => `<option value="${this.escape(category.id)}">${this.escape(category.name)}${suffix(category.id)}</option>`).join("")}</optgroup>`);
+    });
+    return options;
+  }
+
+  // Automatic tracking (apps and websites) reports a source and a key; the category's `match` lists decide where it goes.
+  categoryForSignal(source, key) {
+    const field = source === "web" ? "sites" : "apps";
+    const needle = String(key || "").toLowerCase();
+    if (!needle) return "";
+    const found = this.store.state.categories.find(category => (category.match?.[field] || []).some(entry => {
+      const name = String(entry).toLowerCase();
+      return needle === name || (field === "sites" && needle.endsWith(`.${name}`));
+    }));
+    return found?.id || "";
+  }
+
+  // Every stretch of tracked time as { start, end, category, domain, taskId, source } in ms. Task sessions (timer) and
+  // automatic entries (app / web) both land here, so every chart counts them the same way.
+  allSpans(now = Date.now()) {
+    const spans = [];
+    const push = (start, end, category, taskId, source) => {
+      if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return;
+      spans.push({ start, end, category: category || "", domain: this.domainIdOfCategory(category), taskId: taskId || null, source });
+    };
+    this.store.state.tasks.forEach(task => this.taskSessions(task, now).forEach(session =>
+      push(new Date(session.start).getTime(), new Date(session.end).getTime(), task.category, task.id, "timer")));
+    (this.store.state.trackedEntries || []).forEach(entry =>
+      push(new Date(entry.start).getTime(), new Date(entry.end).getTime(), entry.category || this.categoryForSignal(entry.source, entry.key), null, entry.source === "web" ? "web" : "app"));
+    return spans;
+  }
+
+  // ---- Daily targets and limits (one per domain) ---------------------------------
+  targetsFor(dateKey) {
+    const targets = this.store.state.dailyTargets?.[dateKey];
+    return targets && typeof targets === "object" ? targets : {};
+  }
+
+  targetFor(dateKey, domainId) {
+    return Number(this.targetsFor(dateKey)[domainId]) || 0;
+  }
+
+  setTargets(dateKey, targets) {
+    const clean = {};
+    FocusApp.DOMAINS.forEach(domain => {
+      const milliseconds = Math.round(Number(targets[domain.id]) || 0);
+      if (milliseconds > 0) clean[domain.id] = Math.min(milliseconds, 24 * 3600000);
+    });
+    this.store.state.dailyTargets = { ...this.store.state.dailyTargets, [dateKey]: clean };
     this.store.save();
+  }
+
+  // The first prompt of a new day starts from the latest earlier day that had any targets.
+  suggestedTargets(dateKey) {
+    const days = Object.keys(this.store.state.dailyTargets).filter(key => key < dateKey && Object.keys(this.targetsFor(key)).length).sort();
+    return days.length ? this.targetsFor(days[days.length - 1]) : {};
   }
 
   // First visit of a day: ask once the loading screen is gone. Any answer (even Skip) is stored, so a
@@ -798,48 +944,52 @@ class FocusApp {
   openTargetModal(dateKey, asking = false) {
     this.closeTaskModal();
     const modal = this.document.getElementById("targetModal");
-    const current = this.targetFor(dateKey);
-    const hours = current ? Math.floor(current / 3600000) : "";
-    const minutes = current ? Math.round((current % 3600000) / 60000) : "";
-    const presets = [1, 2, 3, 4, 6].map(h => `<button class="ui-control" type="button" data-preset="${h}">${h}h</button>`).join("");
-    modal.innerHTML = `<div class="task-details" role="dialog" aria-modal="true" aria-label="Daily target">
+    const saved = this.targetsFor(dateKey);
+    const hasSaved = Object.keys(saved).length > 0;
+    const current = asking && !hasSaved ? this.suggestedTargets(dateKey) : saved;
+    const fields = FocusApp.DOMAINS.map(domain => {
+      const milliseconds = Number(current[domain.id]) || 0;
+      const hours = milliseconds ? Math.floor(milliseconds / 3600000) : "";
+      const minutes = milliseconds ? Math.floor((milliseconds % 3600000) / 60000) : "";
+      return `<div class="task-detail-field" data-domain="${domain.id}">
+        <span>${this.escape(domain.name)} · ${domain.goal}</span>
+        <div class="target-inputs">
+          <input type="number" class="ui-field target-hours" min="0" max="24" step="1" inputmode="numeric" placeholder="h" aria-label="${this.escape(domain.name)} ${domain.goal}, hours" value="${hours}">
+          <input type="number" class="ui-field target-minutes" min="0" max="59" step="5" inputmode="numeric" placeholder="min" aria-label="${this.escape(domain.name)} ${domain.goal}, minutes" value="${minutes}">
+        </div>
+      </div>`;
+    }).join("");
+    modal.innerHTML = `<div class="task-details" role="dialog" aria-modal="true" aria-label="Daily targets">
       <div class="task-detail-head">
-        <h2 class="panel-title task-detail-title">${asking ? "Today's focus target" : (current ? "Edit target" : "Add target")}</h2>
+        <h2 class="panel-title task-detail-title">${asking ? "Today's targets" : (hasSaved ? "Edit targets" : "Add targets")}</h2>
       </div>
-      <p class="settings-note target-note">${asking ? "How long do you want to focus today?" : this.escape(this.formatTaskDate(dateKey))}</p>
-      <div class="target-presets">${presets}</div>
-      <div class="task-detail-fields">
-        <label class="task-detail-field"><span>Hours</span>
-          <input type="number" class="ui-field" id="targetHours" min="0" max="24" step="1" inputmode="numeric" placeholder="0" value="${hours}"></label>
-        <label class="task-detail-field"><span>Minutes</span>
-          <input type="number" class="ui-field" id="targetMinutes" min="0" max="59" step="5" inputmode="numeric" placeholder="0" value="${minutes}"></label>
-      </div>
+      <p class="settings-note target-note">${asking ? "Aim for a target in Work, Life and Hobbies, stay under the limit in Entertainment. Leave a field empty for none." : `${this.escape(this.formatTaskDate(dateKey))} · leave a field empty for none`}</p>
+      <div class="task-detail-fields">${fields}</div>
       <p class="settings-note is-error" id="targetError" aria-live="polite"></p>
       <div class="task-detail-footer">
-        ${!asking && current ? '<button class="ui-control" type="button" data-action="remove">Remove target</button>' : ""}
+        ${!asking && hasSaved ? '<button class="ui-control" type="button" data-action="remove">Clear all</button>' : ""}
         <button class="ui-control" type="button" data-action="cancel">${asking ? "Skip today" : "Cancel"}</button>
-        <button class="ui-control" type="button" data-action="save">${asking ? "Set target" : "Save"}</button>
+        <button class="ui-control" type="button" data-action="save">${asking ? "Set targets" : "Save"}</button>
       </div>
     </div>`;
     modal.hidden = false;
     this.targetModalState = { dateKey, asking };
-    const hoursInput = modal.querySelector("#targetHours");
-    const minutesInput = modal.querySelector("#targetMinutes");
-    modal.querySelectorAll("[data-preset]").forEach(button => {
-      button.onclick = () => { hoursInput.value = button.dataset.preset; minutesInput.value = ""; };
-    });
     modal.querySelector('[data-action="cancel"]').onclick = () => this.closeTargetModal();
     const remove = modal.querySelector('[data-action="remove"]');
-    if (remove) remove.onclick = () => { this.setTarget(dateKey, 0); this.closeTargetModal(true); };
+    if (remove) remove.onclick = () => { this.setTargets(dateKey, {}); this.closeTargetModal(true); };
     const save = () => {
-      const total = (Number(hoursInput.value) || 0) * 3600000 + (Number(minutesInput.value) || 0) * 60000;
-      if (total <= 0 || total > 24 * 3600000) { modal.querySelector("#targetError").textContent = "Enter a target between 1 minute and 24 hours."; return; }
-      this.setTarget(dateKey, total);
+      const targets = {};
+      for (const field of modal.querySelectorAll("[data-domain]")) {
+        const total = (Number(field.querySelector(".target-hours").value) || 0) * 3600000 + (Number(field.querySelector(".target-minutes").value) || 0) * 60000;
+        if (total < 0 || total > 24 * 3600000) { modal.querySelector("#targetError").textContent = "Each value must be between 1 minute and 24 hours."; return; }
+        targets[field.dataset.domain] = total;
+      }
+      this.setTargets(dateKey, targets);
       this.closeTargetModal(true);
     };
     modal.querySelector('[data-action="save"]').onclick = save;
     modal.onkeydown = event => { if (event.key === "Enter") { event.preventDefault(); save(); } };
-    window.setTimeout(() => (hoursInput.value ? minutesInput : hoursInput).focus(), 50);
+    window.setTimeout(() => modal.querySelector(".target-hours").focus(), 50);
   }
 
   closeTargetModal(saved = false) {
@@ -847,7 +997,7 @@ class FocusApp {
     if (!modal || modal.hidden) return;
     const { dateKey, asking } = this.targetModalState || {};
     // skipping the first-visit question is remembered too, so it isn't asked again today
-    if (!saved && asking && dateKey && !(dateKey in this.store.state.dailyTargets)) this.setTarget(dateKey, 0);
+    if (!saved && asking && dateKey && !(dateKey in this.store.state.dailyTargets)) this.setTargets(dateKey, {});
     modal.innerHTML = "";
     modal.hidden = true;
     this.targetModalState = null;
@@ -1687,18 +1837,10 @@ class FocusApp {
   }
 
   renderCategoryFilter() {
-    const { categories, tasks } = this.store.state;
+    const { tasks } = this.store.state;
     const activeDate = this.selectedDate || this.today();
-    const allCount = tasks.filter(task => task.date === activeDate).length;
-    const options = [`<option value="all">All categories (${allCount})</option>`];
-
-    categories.forEach(category => {
-      const count = tasks.filter(task =>
-        task.date === activeDate && task.category === category.id
-      ).length;
-      options.push(`<option value="${this.escape(category.id)}">${this.escape(category.name)} (${count})</option>`);
-    });
-
+    const dayTasks = tasks.filter(task => task.date === activeDate);
+    const options = this.groupedFilterOptions("All categories", value => ` (${dayTasks.filter(task => this.matchesFilter(task.category, value)).length})`);
     this.elements.categoryFilter.innerHTML = options.join("");
     this.elements.categoryFilter.value = this.selectedCategory;
     this.elements.categoryFilter.onchange = event => {
@@ -1710,23 +1852,41 @@ class FocusApp {
   renderCategoryEditor() {
     const counts = new Map();
     this.store.state.tasks.forEach(task => counts.set(task.category, (counts.get(task.category) || 0) + 1));
-    this.elements.categoryEditor.innerHTML = this.store.state.categories.length
-      ? this.store.state.categories.map(category => `<div class="category-row" data-category-id="${this.escape(category.id)}">
+    const domainSelect = this.elements.newCategoryDomain;
+    if (domainSelect && !domainSelect.options.length) {
+      domainSelect.innerHTML = FocusApp.DOMAINS.map(domain => `<option value="${domain.id}">${this.escape(domain.name)}</option>`).join("");
+    }
+    const row = category => `<div class="category-row" data-category-id="${this.escape(category.id)}">
           <input class="category-color" type="color" value="${this.colorPickerValue(category.color)}" aria-label="Change ${this.escape(category.name)} color">
           <input class="ui-field category-name" type="text" value="${this.escape(category.name)}" maxlength="40" aria-label="Category name">
+          <select class="ui-control category-domain" aria-label="Domain of ${this.escape(category.name)}">${FocusApp.DOMAINS.map(domain =>
+            `<option value="${domain.id}"${domain.id === category.domain ? " selected" : ""}>${this.escape(domain.name)}</option>`).join("")}</select>
           <span class="count">${counts.get(category.id) || 0} ${(counts.get(category.id) || 0) === 1 ? "task" : "tasks"}</span>
           <button class="ui-control remove-category" type="button" data-action="remove-category" title="Remove ${this.escape(category.name)}" aria-label="Remove ${this.escape(category.name)}">×</button>
-        </div>`).join("")
-      : '<div class="category-editor-empty">No categories yet.</div>';
+        </div>`;
+    this.elements.categoryEditor.innerHTML = FocusApp.DOMAINS.map(domain => {
+      const inside = this.store.state.categories.filter(category => category.domain === domain.id);
+      return `<h3 style="display:flex;align-items:baseline;justify-content:space-between;margin:14px 0 6px">${this.escape(domain.name)}<span style="color:var(--muted);font-size:12px;font-weight:400">Daily ${domain.goal}</span></h3>${
+        inside.length ? inside.map(row).join("") : '<div class="category-editor-empty">No categories yet.</div>'}`;
+    }).join("");
 
-    this.elements.categoryEditor.querySelectorAll(".category-row").forEach(row => {
-      const categoryId = row.dataset.categoryId;
-      row.querySelector(".category-color").oninput = event => this.changeCategoryColor(categoryId, event.target.value);
-      const nameField = row.querySelector(".category-name");
+    this.elements.categoryEditor.querySelectorAll(".category-row").forEach(rowElement => {
+      const categoryId = rowElement.dataset.categoryId;
+      rowElement.querySelector(".category-color").oninput = event => this.changeCategoryColor(categoryId, event.target.value);
+      const nameField = rowElement.querySelector(".category-name");
       nameField.onchange = () => this.renameCategory(categoryId, nameField.value);
       nameField.onkeydown = event => { if (event.key === "Enter") nameField.blur(); };
-      row.querySelector('[data-action="remove-category"]').onclick = () => this.removeCategory(categoryId);
+      rowElement.querySelector(".category-domain").onchange = event => this.moveCategory(categoryId, event.target.value);
+      rowElement.querySelector('[data-action="remove-category"]').onclick = () => this.removeCategory(categoryId);
     });
+  }
+
+  moveCategory(id, domainId) {
+    const category = this.categoryOf(id);
+    if (!category || !this.domainInfo(domainId)) return;
+    category.domain = domainId;
+    this.store.save();
+    this.render();
   }
 
   renameCategory(id, name) {
@@ -1756,7 +1916,7 @@ class FocusApp {
     });
     if (this.selectedCategory === id) this.selectedCategory = "all";
     if (this.selectedActivityCategory === id) this.selectedActivityCategory = "all";
-    this.selectedTrendCategories = this.selectedTrendCategories.filter(cId => cId !== id);
+    this.selectedTrendCategories = this.selectedTrendCategories.filter(cId => cId !== `c:${id}`);
     this.store.save();
     this.render();
   }
@@ -1773,7 +1933,7 @@ class FocusApp {
     const activeDate = this.selectedDate || this.today();
     const tasks = this.store.state.tasks
       .filter(task => task.date === activeDate)
-      .filter(task => this.selectedCategory === "all" || task.category === this.selectedCategory)
+      .filter(task => this.matchesFilter(task.category, this.selectedCategory))
       .filter(task => !this.hideCompleted || !task.done) // Add this filter line
       .sort((first, second) => this.compareTasks(first, second));
     const todaysTasks = this.store.state.tasks
@@ -1997,69 +2157,71 @@ class FocusApp {
   renderFocusSummary() {
     const categories = this.store.state.categories;
     const activeDate = this.selectedDate || this.today();
-    const totals = categories.map(category => ({
-      ...category,
-      milliseconds: 0
-    }));
-    const now = Date.now();
+    const [dayYear, dayMonth, dayNumber] = activeDate.split("-").map(Number);
+    const dayStart = new Date(dayYear, dayMonth - 1, dayNumber).getTime();
+    const dayEnd = new Date(dayYear, dayMonth - 1, dayNumber + 1).getTime();
+    const perCategory = new Map();
     let totalMilliseconds = 0;
-    this.store.state.tasks.forEach(task => {
-      const milliseconds = this.focusDurationOnDate(task, activeDate, now);
+    this.allSpans(Date.now()).forEach(span => {
+      const milliseconds = Math.max(0, Math.min(span.end, dayEnd) - Math.max(span.start, dayStart));
+      if (!milliseconds) return;
       totalMilliseconds += milliseconds;
-      const category = totals.find(item => item.id === task.category);
-      if (category) category.milliseconds += milliseconds;
-      else {
-        let uncategorized = totals.find(item => item.id === "");
-        if (!uncategorized) {
-          uncategorized = { id: "", name: "Uncategorized", color: "#999", milliseconds: 0 };
-          totals.push(uncategorized);
-        }
-        uncategorized.milliseconds += milliseconds;
-      }
+      perCategory.set(span.category, (perCategory.get(span.category) || 0) + milliseconds);
     });
 
     this.elements.focusSelectedDate.textContent = this.formatTaskDate(activeDate);
     this.elements.focusTotal.textContent = this.duration(totalMilliseconds);
-    const targetMilliseconds = this.targetFor(activeDate);
-    this.elements.focusTargetBtn.textContent = targetMilliseconds ? "Edit target" : "Add target";
+    const targets = this.targetsFor(activeDate);
+    const hasTargets = Object.keys(targets).length > 0;
+    this.elements.focusTargetBtn.textContent = hasTargets ? "Edit targets" : "Add targets";
     this.elements.focusTargetBtn.dataset.date = activeDate;
-    const progress = targetMilliseconds ? Math.min(100, (totalMilliseconds / targetMilliseconds) * 100) : 0;
-    const withTime = totals.filter(category => category.milliseconds > 0);
-    const legend = totals.length
-      ? `<div class="focus-legend" aria-label="Category colours">${totals.map(category =>
+
+    const groups = FocusApp.DOMAINS.map(domain => {
+      const inside = categories.filter(category => category.domain === domain.id)
+        .map(category => ({ ...category, milliseconds: perCategory.get(category.id) || 0 }));
+      return { domain, inside, milliseconds: inside.reduce((sum, category) => sum + category.milliseconds, 0), target: Number(targets[domain.id]) || 0 };
+    });
+    const loose = totalMilliseconds - groups.reduce((sum, group) => sum + group.milliseconds, 0);   // no category (or a removed one)
+    if (loose > 0) groups.push({ domain: { id: "", name: "Uncategorized", color: "#999", goal: "none" }, inside: [{ id: "", name: "Uncategorized", color: "#999", milliseconds: loose }], milliseconds: loose, target: 0 });
+
+    // One bar per domain, fragmented by category. With a target a segment's width is its share of the target (or of the
+    // domain's time once it is exceeded, so the bar never overflows). Without one the bar shows the domain's share of the day.
+    const segment = (category, scale) => `<span class="focus-goal-segment" style="width:${scale > 0 ? (category.milliseconds / scale) * 100 : 0}%;background:${this.escape(category.color)}" data-name="${this.escape(category.name)}" data-time="${this.escape(this.duration(category.milliseconds))}" data-color="${this.escape(category.color)}"></span>`;
+    const rows = groups.filter(group => group.milliseconds > 0 || group.target > 0).map(group => {
+      const { domain, target, milliseconds } = group;
+      const scale = target ? Math.max(target, milliseconds) : totalMilliseconds;
+      const over = target && milliseconds > target;
+      const noun = domain.goal === "limit" ? "limit" : "target";
+      const value = target
+        ? `${this.duration(milliseconds)} / ${this.duration(target)} ${noun}${over ? ` · ${this.duration(milliseconds - target)} ${domain.goal === "limit" ? "over" : "extra"}` : ""}`
+        : this.duration(milliseconds);
+      const warn = over && domain.goal === "limit" ? ' style="color:#ff8a8a"' : "";
+      const progress = target ? Math.min(100, (milliseconds / target) * 100) : 0;
+      const role = target ? `role="progressbar" aria-label="${this.escape(domain.name)} ${noun} progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(progress)}"` : `role="img" aria-label="${this.escape(domain.name)} share of the day"`;
+      return `<div class="focus-goal-label"><span>${this.escape(domain.name)}</span><span${warn}>${this.escape(value)}</span></div>
+        <div class="focus-goal-wrap"><div class="focus-goal-track" ${role}>${group.inside.filter(category => category.milliseconds > 0).map(category => segment(category, scale)).join("")}</div><div class="focus-goal-tip" hidden></div></div>`;
+    }).join("");
+    const withTime = groups.flatMap(group => group.inside).filter(category => category.milliseconds > 0);
+    const legend = withTime.length
+      ? `<div class="focus-legend" aria-label="Category colours">${withTime.map(category =>
         `<span class="focus-legend-item"><span class="dot" style="background:${this.escape(category.color)}"></span>${this.escape(category.name)}</span>`).join("")}</div>`
       : "";
-    // One bar, fragmented by category. With a target a segment's width is its share of the target (or of the
-    // total once the target is exceeded, so the bar never overflows). Without one, the bar is the whole day:
-    // each segment is that category's share of the time spent.
-    const scale = targetMilliseconds ? Math.max(targetMilliseconds, totalMilliseconds) : totalMilliseconds;
-    const segments = withTime.map(category =>
-      `<span class="focus-goal-segment" style="width:${(category.milliseconds / scale) * 100}%;background:${this.escape(category.color)}" data-name="${this.escape(category.name)}" data-time="${this.escape(this.duration(category.milliseconds))}" data-color="${this.escape(category.color)}"></span>`).join("");
-    let html;
-    if (targetMilliseconds) {
-      html = `<div class="focus-goal-label"><span>Daily target</span><span>${this.duration(totalMilliseconds)} / ${this.duration(targetMilliseconds)}</span></div>
-        <div class="focus-goal-wrap"><div class="focus-goal-track" role="progressbar" aria-label="Daily focus target progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${Math.round(progress)}">${segments}</div><div class="focus-goal-tip" hidden></div></div>${legend}`;
-    } else if (totalMilliseconds > 0) {
-      html = `<div class="focus-goal-label"><span>Time by category</span><span>${this.duration(totalMilliseconds)}</span></div>
-        <div class="focus-goal-wrap"><div class="focus-goal-track" role="img" aria-label="Share of focus time by category">${segments}</div><div class="focus-goal-tip" hidden></div></div>${legend}`;
-    } else {
-      html = `<div class="focus-goal-empty">No focus target set for this day.</div>${legend}`;
-    }
+    const html = rows ? `${rows}${legend}` : `<div class="focus-goal-empty">Nothing tracked and no targets for this day.</div>`;
     if (html === this.lastSummaryHtml) return;        // runs every second: don't rebuild (and reset the hover tip) for nothing
     this.lastSummaryHtml = html;
     this.elements.focusProgress.innerHTML = html;
-    const wrap = this.elements.focusProgress.querySelector(".focus-goal-wrap");
-    if (!wrap) return;
-    const tip = wrap.querySelector(".focus-goal-tip");
-    wrap.onmousemove = event => {
-      const segment = event.target.closest(".focus-goal-segment");
-      if (!segment) { tip.hidden = true; return; }
-      tip.innerHTML = `<span class="dot" style="background:${segment.dataset.color}"></span><b>${segment.dataset.name}</b> ${segment.dataset.time}`;
-      tip.hidden = false;
-      const box = wrap.getBoundingClientRect();
-      tip.style.left = `${Math.min(Math.max(event.clientX - box.left, tip.offsetWidth / 2), box.width - tip.offsetWidth / 2)}px`;
-    };
-    wrap.onmouseleave = () => { tip.hidden = true; };
+    this.elements.focusProgress.querySelectorAll(".focus-goal-wrap").forEach(wrap => {
+      const tip = wrap.querySelector(".focus-goal-tip");
+      wrap.onmousemove = event => {
+        const hovered = event.target.closest(".focus-goal-segment");
+        if (!hovered) { tip.hidden = true; return; }
+        tip.innerHTML = `<span class="dot" style="background:${hovered.dataset.color}"></span><b>${hovered.dataset.name}</b> ${hovered.dataset.time}`;
+        tip.hidden = false;
+        const box = wrap.getBoundingClientRect();
+        tip.style.left = `${Math.min(Math.max(event.clientX - box.left, tip.offsetWidth / 2), box.width - tip.offsetWidth / 2)}px`;
+      };
+      wrap.onmouseleave = () => { tip.hidden = true; };
+    });
   }
 
   // ---- Analytics widgets ---------------------------------------------------------
@@ -2067,14 +2229,14 @@ class FocusApp {
   // (the big number) and .focus-goal-label + .focus-goal-track (a labelled row, optionally with a bar).
   analyticsData(now = Date.now()) {
     const { tasks, categories } = this.store.state;
-    const perDay = new Map(), perCategory = new Map(), perTask = new Map();
+    const perDay = new Map(), perCategory = new Map(), perTask = new Map(), perDomain = new Map();
     const perHour = Array(24).fill(0);
-    tasks.forEach(task => this.taskSessions(task, now).forEach(session => {
-      const a = new Date(session.start).getTime(), b = new Date(session.end).getTime();
-      if (!Number.isFinite(a) || !Number.isFinite(b) || b <= a) return;
+    this.allSpans(now).forEach(span => {
+      const a = span.start, b = span.end;
       const add = (map, key) => map.set(key, (map.get(key) || 0) + (b - a));
-      add(perTask, task.id);
-      add(perCategory, task.category || "");
+      if (span.taskId) add(perTask, span.taskId);
+      add(perCategory, span.category);
+      add(perDomain, span.domain);
       for (let cursor = a; cursor < b;) {
         const date = new Date(cursor);
         const next = new Date(date.getFullYear(), date.getMonth(), date.getDate(), date.getHours() + 1).getTime();
@@ -2084,8 +2246,8 @@ class FocusApp {
         perDay.set(key, (perDay.get(key) || 0) + slice);
         cursor += slice;
       }
-    }));
-    return { tasks, categories, perDay, perCategory, perTask, perHour };
+    });
+    return { tasks, categories, perDay, perCategory, perTask, perDomain, perHour };
   }
 
   renderAnalyticsWidgets() {
@@ -2133,13 +2295,17 @@ class FocusApp {
       const max = Math.max(0, ...items.map(i => i.value));
       return items.map(i => ({ label: i.label, value: fmt(i.value), bar: max > 0 ? (i.value / max) * 100 : 0, color: i.color || "var(--rain)" }));
     };
+    const domainRows = FocusApp.DOMAINS.map(domain => ({ label: domain.name, value: d.perDomain.get(domain.id) || 0, color: domain.color }));
+    const topDomain = [...domainRows].sort((x, y) => y.value - x.value)[0];
     const widgets = [
-      { title: "This week", big: dur(thisWeek), label: "Focus time since Monday", rows: [
+      { title: "Domains", big: topDomain && topDomain.value > 0 ? topDomain.label : "–", label: "Where your time goes, all time",
+        rows: bars(domainRows, ms => `${dur(ms)} · ${pct(ms, totalMs)}%`) },
+      { title: "This week", big: dur(thisWeek), label: "Time tracked since Monday", rows: [
         ...bars([{ label: "This week", value: thisWeek }, { label: "Last week", value: lastWeek }]),
-        { label: "Change", value: change(thisWeek, lastWeek) }, { label: "Days with focus, all time", value: activeDays }] },
-      { title: "Time of day", big: totalMs ? hourLabel(peakHour) : "–", label: "Most productive hour", rows: bars(buckets) },
-      { title: "Day of week", big: totalMs ? dayNames[bestWeekday] : "–", label: "Most productive weekday", rows: bars(dayNames.map((label, i) => ({ label, value: weekdayTotals[i] }))) },
-      { title: "Categories", big: catRows.length ? catName(catRows[0][0]) : "–", label: "Most focused category, all time",
+        { label: "Change", value: change(thisWeek, lastWeek) }, { label: "Days tracked, all time", value: activeDays }] },
+      { title: "Time of day", big: totalMs ? hourLabel(peakHour) : "–", label: "Most active hour", rows: bars(buckets) },
+      { title: "Day of week", big: totalMs ? dayNames[bestWeekday] : "–", label: "Most active weekday", rows: bars(dayNames.map((label, i) => ({ label, value: weekdayTotals[i] }))) },
+      { title: "Categories", big: catRows.length ? catName(catRows[0][0]) : "–", label: "Most tracked category, all time",
         rows: bars(catRows.map(([id, ms]) => ({ label: catName(id), value: ms, color: catColor(id) })), ms => `${dur(ms)} · ${pct(ms, totalMs)}%`) },
       { title: "Estimates", big: rated.length ? `${pct(onTarget, rated.length)}%` : "–", label: "Finished tasks on target", rows:
         bars([{ label: "Faster than estimated", value: faster }, { label: "On target", value: onTarget }, { label: "Slower than estimated", value: slower }], String) }
@@ -2212,31 +2378,21 @@ class FocusApp {
     const currentYear = new Date(now).getFullYear();
 
     // --- 1. NEW: Populate the Category Dropdown ---
-    const catOptions = [`<option value="all">All categories</option>`];
-    this.store.state.categories.forEach(c => catOptions.push(`<option value="${this.escape(c.id)}">${this.escape(c.name)}</option>`));
-    this.elements.activityCategoryFilter.innerHTML = catOptions.join("");
-    this.elements.activityCategoryFilter.value = this.selectedActivityCategory;
-    this.elements.activityCategoryFilter.onchange = (e) => {
-      this.selectedActivityCategory = e.target.value;
-      this.renderActivityCalendar(); // Re-render immediately when changed
-    };
+    this.renderActivityFilter(now);
 
-    const selectedCategoryObj = this.store.state.categories.find(c => c.id === this.selectedActivityCategory);
+    const selectedColor = this.selectedActivityCategory.startsWith("d:")
+      ? this.domainInfo(this.selectedActivityCategory.slice(2))?.color
+      : this.categoryOf(this.selectedActivityCategory)?.color;
     // One perceptual ramp per category (see activityRamp); "All categories" uses the default green.
-    this.activityRamp(selectedCategoryObj?.color || "#39d353").forEach((color, index) => {
+    this.activityRamp(selectedColor || "#39d353").forEach((color, index) => {
       this.elements.activityCard.style.setProperty(`--level-${index + 1}`, color);
     });
 
     // --- 2. Existing Year Logic ---
     const availableYears = new Set(Array.from({ length: 10 }, (_, index) => currentYear - index));
-    this.store.state.tasks.forEach(task => {
-      this.taskSessions(task, now).forEach(session => {
-        const start = new Date(session.start).getTime();
-        if (Number.isFinite(start)) {
-          const sessionYear = new Date(start).getFullYear();
-          if (sessionYear < currentYear) availableYears.add(sessionYear);
-        }
-      });
+    this.allSpans(now).forEach(span => {
+      const sessionYear = new Date(span.start).getFullYear();
+      if (sessionYear < currentYear) availableYears.add(sessionYear);
     });
     const earliestYear = Math.max(currentYear - 99, Math.min(...availableYears));
     const years = Array.from({ length: currentYear - earliestYear + 1 }, (_, index) => currentYear - index);
@@ -2277,25 +2433,17 @@ class FocusApp {
 
     // --- 4. Calculate Totals with NEW Category Filter ---
     const rangeEnd = yearEnd.getTime();
-    this.store.state.tasks.forEach(task => {
-      // THE NEW FILTER: Skip this task if a specific category is selected and it doesn't match
-      if (this.selectedActivityCategory !== "all" && task.category !== this.selectedActivityCategory) return;
-
-      const sessions = this.taskSessions(task, now);
-      sessions.forEach(session => {
-        const start = new Date(session.start).getTime();
-        const end = new Date(session.end).getTime();
-        if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return;
-        let cursor = Math.max(start, yearStart.getTime());
-        while (cursor < end && cursor < rangeEnd) {
-          const date = new Date(cursor);
-          const key = this.dateKey(date);
-          const nextDay = new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1).getTime();
-          const overlap = Math.min(end, nextDay, rangeEnd) - cursor;
-          if (totals.has(key) && overlap > 0) totals.set(key, totals.get(key) + overlap);
-          cursor += overlap;
-        }
-      });
+    this.allSpans(now).forEach(span => {
+      if (!this.matchesFilter(span.category, this.selectedActivityCategory)) return;
+      let cursor = Math.max(span.start, yearStart.getTime());
+      while (cursor < span.end && cursor < rangeEnd) {
+        const date = new Date(cursor);
+        const key = this.dateKey(date);
+        const nextDay = new Date(date.getFullYear(), date.getMonth(), date.getDate() + 1).getTime();
+        const overlap = Math.min(span.end, nextDay, rangeEnd) - cursor;
+        if (totals.has(key) && overlap > 0) totals.set(key, totals.get(key) + overlap);
+        cursor += overlap;
+      }
     });
 
     const levelFor = milliseconds => {
@@ -2313,7 +2461,7 @@ class FocusApp {
       const milliseconds = totals.get(date);
       const level = levelFor(milliseconds);
       
-      return `<button class="activity-cell" type="button" data-activity-date="${date}" data-level="${level}" aria-label="${this.escape(this.formatTaskDate(date))}: ${this.escape(this.duration(milliseconds))} focus time" aria-pressed="${date === this.selectedDate}" title="${this.escape(this.formatTaskDate(date))}: ${this.escape(this.duration(milliseconds))}"></button>`;
+      return `<button class="activity-cell" type="button" data-activity-date="${date}" data-level="${level}" aria-label="${this.escape(this.formatTaskDate(date))}: ${this.escape(this.duration(milliseconds))} tracked time" aria-pressed="${date === this.selectedDate}" title="${this.escape(this.formatTaskDate(date))}: ${this.escape(this.duration(milliseconds))}"></button>`;
     }).join("");
 
     // --- 6. Existing Month Labels & Bindings ---
@@ -2352,36 +2500,7 @@ class FocusApp {
   }
 
   renderActivityTrend(now = Date.now()) {
-    // 1. Populate the Multi-Select Checkboxes (Max 5)
-    if (this.selectedTrendCategories.length === 0 && this.store.state.categories.length > 0) {
-      this.selectedTrendCategories = this.store.state.categories.slice(0, 5).map(c => c.id);
-    }
-
-    this.elements.trendMultiCount.textContent = `(${this.selectedTrendCategories.length}/5)`;
-    
-    this.elements.trendMultiContent.innerHTML = this.store.state.categories.map(category => {
-      const checked = this.selectedTrendCategories.includes(category.id);
-      const isMax = this.selectedTrendCategories.length >= 5;
-      const disabled = !checked && isMax;
-      
-      return `<label class="${disabled ? "disabled" : ""}">
-        <input type="checkbox" value="${category.id}" ${checked ? "checked" : ""} ${disabled ? "disabled" : ""}>
-        ${this.escape(category.name)}
-      </label>`;
-    }).join("");
-
-    // Bind checkbox events
-    this.elements.trendMultiContent.querySelectorAll('input[type="checkbox"]').forEach(cb => {
-      cb.onchange = (e) => {
-        const id = e.target.value;
-        if (e.target.checked) {
-          if (this.selectedTrendCategories.length < 5) this.selectedTrendCategories.push(id);
-        } else {
-          this.selectedTrendCategories = this.selectedTrendCategories.filter(cId => cId !== id);
-        }
-        this.renderActivityTrend(now);
-      };
-    });
+    this.renderTrendControls(now);
 
     // 2. Existing Date/Bucket Logic
     const selectedDate = this.selectedDate.split("-").map(Number);
@@ -2448,9 +2567,11 @@ class FocusApp {
     });
 
     const activePoints = Object.values(categoryPoints).flat().filter(p => p.milliseconds > 0).length;
-    if (activePoints < 2) {
+    if (activePoints < 1) {
       this.lastTrendHtml = null;
-      this.elements.activityTrendChart.innerHTML = '<p class="focus-trend-empty">Not enough data</p>';
+      this.elements.activityTrendChart.innerHTML = `<p class="focus-trend-empty">${this.selectedTrendCategories.length
+        ? "Nothing tracked in this period. Try a longer view or another day."
+        : "Add a line to see the trend."}</p>`;
       return;
     }
 
@@ -2491,13 +2612,13 @@ class FocusApp {
 
     const allPoints = [];
     const series = this.selectedTrendCategories.map((catId, seriesIndex) => {
-      const category = this.store.state.categories.find(c => c.id === catId);
-      if (!category) return "";
-      const color = this.readableColor(category.color);
+      const info = this.seriesInfo(catId);
+      if (!info) return "";
+      const color = this.readableColor(info.color);
       const points = categoryPoints[catId].map((point, index) => ({
         x: left + (index / Math.max(1, categoryPoints[catId].length - 1)) * chartWidth,
         y: baseline - (point.milliseconds / yMax) * chartHeight,
-        ms: point.milliseconds, label: point.label, name: category.name, color
+        ms: point.milliseconds, label: point.label, name: info.name, color
       }));
       allPoints.push(...points);
       const line = curve(points);
@@ -2541,9 +2662,9 @@ class FocusApp {
 
     // 8. Render. Only redraw (and replay the draw-in animation) when something actually changed.
     const html = `
-      <div class="focus-trend-caption">${rangeLabel} focus time · ${this.escape(periodCaption)}</div>
+      <div class="focus-trend-caption">${rangeLabel} tracked time · ${this.escape(periodCaption)}</div>
       <div class="focus-trend-stage">
-        <svg class="focus-trend-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${rangeLabel} focus time trend">
+        <svg class="focus-trend-svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="${rangeLabel} tracked time trend">
           <defs>${defs}</defs>
           ${axis}
           ${shapes}
@@ -2600,20 +2721,114 @@ class FocusApp {
     svg.onmouseleave = hide;
   }
 
-  focusDurationBetween(startTime, endTime, now = Date.now(), categoryId = null) {
+  // Tracked time inside a window. `seriesKey`: "d:<domain>", "c:<category>", a category id, or empty for everything.
+  focusDurationBetween(startTime, endTime, now = Date.now(), seriesKey = null) {
     const clippedEnd = Math.min(endTime, now);
     if (clippedEnd <= startTime) return 0;
-    
-    return this.store.state.tasks
-      .filter(task => categoryId ? task.category === categoryId : true)
-      .reduce((total, task) => total + this.taskSessions(task, now).reduce((taskTotal, session) => {
-        const sessionStart = new Date(session.start).getTime();
-        const sessionEnd = new Date(session.end).getTime();
-        if (!Number.isFinite(sessionStart) || !Number.isFinite(sessionEnd) || sessionEnd <= sessionStart) return taskTotal;
-        return taskTotal + Math.max(0, Math.min(sessionEnd, clippedEnd) - Math.max(sessionStart, startTime));
-      }, 0), 0);
+    return this.allSpans(now)
+      .filter(span => this.seriesMatches(span.category, seriesKey))
+      .reduce((total, span) => total + Math.max(0, Math.min(span.end, clippedEnd) - Math.max(span.start, startTime)), 0);
   }
 
+  // A pill button in the shared selected-tile look; `color` adds the domain / category dot.
+  chipMarkup(attributes, active, color, label, extra = "") {
+    return `<button type="button" class="ui-control domain-chip${active ? " is-active" : ""}" ${attributes} aria-pressed="${active}">${
+      color ? `<span class="dot" style="background:${this.escape(color)}"></span>` : ""}${this.escape(label)}${extra}</button>`;
+  }
+
+  // Activity heatmap: pick a domain with one tap; a category list for that domain appears next to the year.
+  renderActivityFilter(now = Date.now()) {
+    const filter = this.selectedActivityCategory;
+    const domainId = filter === "all" ? "" : filter.startsWith("d:") ? filter.slice(2) : this.domainIdOfCategory(filter);
+    const current = domainId ? `d:${domainId}` : "all";
+    const chips = [["all", "All", ""], ...FocusApp.DOMAINS.map(domain => [`d:${domain.id}`, domain.name, domain.color])]
+      .map(([value, label, color]) => this.chipMarkup(`data-activity-filter="${this.escape(value)}"`, value === current, color, label)).join("");
+    const select = this.elements.activityCategoryFilter;
+    const wrap = select.closest("label");
+    const domain = this.domainInfo(domainId);
+    const options = domain
+      ? `<option value="d:${domain.id}">All ${this.escape(domain.name)}</option>${this.store.state.categories.filter(category => category.domain === domain.id)
+        .map(category => `<option value="${this.escape(category.id)}">${this.escape(category.name)}</option>`).join("")}`
+      : "";
+    const html = chips + "|" + options;
+    if (html !== this.lastActivityFilterHtml) {
+      this.lastActivityFilterHtml = html;
+      this.elements.activityDomainChips.innerHTML = chips;
+      select.innerHTML = options;
+      this.elements.activityDomainChips.querySelectorAll("[data-activity-filter]").forEach(button => {
+        button.onclick = () => { this.selectedActivityCategory = button.dataset.activityFilter; this.renderActivityCalendar(); };
+      });
+      select.onchange = () => { this.selectedActivityCategory = select.value; this.renderActivityCalendar(); };
+    }
+    wrap.style.display = domain ? "" : "none";
+    if (domain) select.value = filter;
+  }
+
+  // Trend lines: tap a domain to see its categories (or "All domains" for one line each), then tap a line's chip to
+  // drop it or use "+ Add line" to compare anything with anything (up to MAX_TREND_LINES).
+  renderTrendControls(now = Date.now()) {
+    const MAX = FocusApp.MAX_TREND_LINES;
+    if (!this.trendPreset) this.trendPreset = "domains";
+    if (this.selectedTrendCategories.length === 0 && this.trendPreset !== "custom") this.applyTrendPreset(this.trendPreset, now);
+    const selected = this.selectedTrendCategories.filter(key => this.seriesInfo(key));
+    const modes = [["domains", "All domains", ""], ...FocusApp.DOMAINS.map(domain => [`in:${domain.id}`, domain.name, domain.color])];
+    const modeHtml = modes.map(([value, label, color]) => this.chipMarkup(`data-trend-mode="${this.escape(value)}"`, this.trendPreset === value, color, label)).join("");
+
+    const lineChips = selected.map(key => {
+      const info = this.seriesInfo(key);
+      return this.chipMarkup(`data-trend-remove="${this.escape(key)}" title="Remove this line"`, false, this.readableColor(info.color),
+        key.startsWith("d:") ? `${info.name} (all)` : info.name, ' <span style="color:var(--muted)">×</span>');
+    }).join("");
+    const groups = FocusApp.DOMAINS.map(domain => {
+      const keys = [[`d:${domain.id}`, `${domain.name} (everything)`],
+        ...this.store.state.categories.filter(category => category.domain === domain.id).map(category => [`c:${category.id}`, category.name])]
+        .filter(([key]) => !selected.includes(key));
+      return keys.length ? `<optgroup label="${this.escape(domain.name)}">${keys.map(([key, label]) => `<option value="${this.escape(key)}">${this.escape(label)}</option>`).join("")}</optgroup>` : "";
+    }).join("");
+    const add = selected.length >= MAX
+      ? `<span class="settings-note" style="margin:0">Up to ${MAX} lines</span>`
+      : `<select class="ui-control" id="trendAddLine" aria-label="Add a line to the trend"><option value="">+ Add line</option>${groups}</select>`;
+
+    const html = `${modeHtml}|${lineChips}|${add}`;
+    if (html === this.lastTrendControlsHtml) return;
+    this.lastTrendControlsHtml = html;
+    this.elements.trendModeChips.innerHTML = modeHtml;
+    this.elements.trendSeriesChips.innerHTML = lineChips + add;
+    this.elements.trendModeChips.querySelectorAll("[data-trend-mode]").forEach(button => {
+      button.onclick = () => {
+        this.trendPreset = button.dataset.trendMode;
+        this.applyTrendPreset(this.trendPreset, Date.now());
+        this.renderActivityTrend();
+      };
+    });
+    this.elements.trendSeriesChips.querySelectorAll("[data-trend-remove]").forEach(button => {
+      button.onclick = () => {
+        this.selectedTrendCategories = this.selectedTrendCategories.filter(key => key !== button.dataset.trendRemove);
+        this.trendPreset = "custom";
+        this.renderActivityTrend();
+      };
+    });
+    const addSelect = this.elements.trendSeriesChips.querySelector("#trendAddLine");
+    if (addSelect) addSelect.onchange = () => {
+      if (!addSelect.value) return;
+      this.selectedTrendCategories = [...selected, addSelect.value];
+      this.trendPreset = "custom";
+      this.renderActivityTrend();
+    };
+  }
+
+  // "All domains": one line per domain. "Inside <domain>": its five busiest categories.
+  applyTrendPreset(preset, now = Date.now()) {
+    if (preset.startsWith("in:")) {
+      const domainId = preset.slice(3);
+      const totals = new Map();
+      this.allSpans(now).forEach(span => { if (span.domain === domainId) totals.set(span.category, (totals.get(span.category) || 0) + span.end - span.start); });
+      this.selectedTrendCategories = this.store.state.categories.filter(category => category.domain === domainId)
+        .sort((first, second) => (totals.get(second.id) || 0) - (totals.get(first.id) || 0)).slice(0, FocusApp.MAX_TREND_LINES).map(category => `c:${category.id}`);
+    } else {
+      this.selectedTrendCategories = FocusApp.DOMAINS.map(domain => `d:${domain.id}`);
+    }
+  }
   focusDurationOnDate(task, dateKey, now = Date.now()) {
     if (!this.isDateKey(dateKey)) return 0;
     const [year, month, day] = dateKey.split("-").map(Number);
@@ -2681,9 +2896,13 @@ class FocusApp {
     const priority = task.priority || "medium";
     const hasCategory = this.store.state.categories.some(cat => cat.id === task.category);
     const categoryOptions = [
-      ...this.store.state.categories.map(cat =>
-        `<option value="${this.escape(cat.id)}"${cat.id === task.category ? " selected" : ""}>${this.escape(cat.name)}</option>`
-      ),
+      ...FocusApp.DOMAINS.map(domain => {
+        const inside = this.store.state.categories.filter(cat => cat.domain === domain.id);
+        return inside.length
+          ? `<optgroup label="${this.escape(domain.name)}">${inside.map(cat =>
+            `<option value="${this.escape(cat.id)}"${cat.id === task.category ? " selected" : ""}>${this.escape(cat.name)}</option>`).join("")}</optgroup>`
+          : "";
+      }),
       `<option value=""${hasCategory ? "" : " selected"}>Uncategorized</option>`
     ].join("");
     const repeat = ["daily", "weekdays", "weekly", "monthly", "yearly", "custom"].includes(task.repeat) ? task.repeat : "";
@@ -2884,10 +3103,23 @@ class FocusApp {
     const task = isNew ? null : this.store.findTask(taskId);
     if (!isNew && !task) return;
 
+    // a new task follows its domain's usual format until the person picks one themselves
+    let formatTouched = !isNew;
+    const selectFormat = mode => details.querySelectorAll(".task-format-option").forEach(other => {
+      const on = other.dataset.mode === mode;
+      other.classList.toggle("is-active", on);
+      other.setAttribute("aria-pressed", String(on));
+    });
+    details.querySelector(".task-detail-category").addEventListener("change", event => {
+      if (formatTouched) return;
+      const format = this.domainInfo(this.domainIdOfCategory(event.target.value))?.format;
+      if (format) selectFormat(format);
+    });
     details.querySelectorAll(".task-format-option").forEach(option => {
       option.onclick = e => {
         e.preventDefault();
         e.stopPropagation();
+        formatTouched = true;
         details.querySelectorAll(".task-format-option").forEach(other => {
           const on = other === option;
           other.classList.toggle("is-active", on);
@@ -3098,7 +3330,8 @@ class FocusApp {
     if (!cleanName) { field.focus(); return; }
     const id = `${cleanName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${Date.now()}`;
     const color = this.randomColor();
-    this.store.addCategory({ id, name: cleanName, color });
+    const domain = this.domainInfo(this.elements.newCategoryDomain?.value) ? this.elements.newCategoryDomain.value : "work";
+    this.store.addCategory({ id, name: cleanName, color, domain });
     field.value = "";
     this.selectedCategory = id;
     this.render();
@@ -3256,12 +3489,15 @@ class FocusApp {
     task.completedAt = new Date().toISOString();
     const focusedMs = this.taskDuration(task);
     const estimateMs = Number.isFinite(task.estimateMs) && task.estimateMs > 0 ? task.estimateMs : null;
-    const streak = this.bumpStreak();
+    const domain = this.domainInfo(this.domainIdOfTask(task));
+    const rewards = domain ? domain.rewards : true;               // entertainment pays no raindrops and keeps no streak
+    const streak = rewards ? this.bumpStreak() : this.currentStreak();
     this.spawnRecurrence(task);
 
     let reward = null;
     let note = "";
-    if (task.raindropsEarned) note = "Raindrops already earned for this task";
+    if (!rewards) note = `No raindrops for ${domain.name} tasks`;
+    else if (task.raindropsEarned) note = "Raindrops already earned for this task";
     else if (!estimateMs) note = "Set an estimate to earn raindrops";
     else if (focusedMs < FocusApp.RAINDROPS.minFocusMs) note = "Focus a little longer to earn raindrops";
     else {

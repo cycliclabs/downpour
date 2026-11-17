@@ -88,7 +88,7 @@
           </div>
           <div class="panel stat-popover" id="streakPopover" hidden>
             <h2 class="panel-title">Day streak</h2>
-            <p class="settings-note"><b>How to earn</b><br>Complete at least one task every day.</p>
+            <p class="settings-note"><b>How to earn</b><br>Complete at least one Work, Life or Hobbies task every day.</p>
             <h3 class="leaderboard-title">Leaderboard</h3>
             <div class="leaderboard" id="streakBoard"></div>
           </div>
@@ -311,12 +311,12 @@
       <div class="analytics-top">
       <section class="panel" id="focusActivity">
         <div class="activity-heading toolbar">
-          <h2 class="panel-title">Focus activity</h2>
+          <h2 class="panel-title">Activity</h2>
           <div style="display: flex; gap: 8px; align-items: center;">
             <!-- NEW: Activity Category Filter -->
             <label class="activity-year-control">
               <span>Category</span>
-              <select class="ui-control" id="activityCategoryFilter" aria-label="Focus activity category"></select>
+              <select class="ui-control" id="activityCategoryFilter" aria-label="Activity category or domain"></select>
             </label>
             <label class="activity-year-control">
               <span>Year</span>
@@ -324,6 +324,7 @@
             </label>
           </div>
         </div>
+        <div class="domain-chips" id="activityDomainChips" role="group" aria-label="Filter the activity by domain"></div>
         <div class="activity-scroll" aria-label="Focus activity by day">
           <div class="activity-calendar">
             <div class="activity-months" id="activityMonths" aria-hidden="true"></div>
@@ -346,15 +347,8 @@
       </section>
       <section class="focus-trend panel" id="focusTrend">
         <div class="focus-trend-heading toolbar">
-          <h2 class="panel-title">Focus trend</h2>
+          <h2 class="panel-title">Trend</h2>
           <div style="display: flex; gap: 8px; align-items: center;">
-            <!-- NEW: Multi-select Dropdown for Trend Categories -->
-            <div class="trend-multi-select" id="trendMultiSelect">
-              <button class="ui-control trend-multi-btn" id="trendMultiBtn" type="button">
-                Categories <span class="trend-multi-count" id="trendMultiCount">(0)</span>
-              </button>
-              <div class="trend-multi-content" id="trendMultiContent"></div>
-            </div>
             <label class="focus-trend-control">
               <span>View</span>
               <select id="activityTrendRange" class="ui-control" aria-label="Focus trend period">
@@ -366,6 +360,8 @@
             </label>
           </div>
         </div>
+        <div class="domain-chips" id="trendModeChips" role="group" aria-label="What the trend shows"></div>
+        <div class="domain-chips" id="trendSeriesChips" role="group" aria-label="Lines in the trend"></div>
         <div id="activityTrendChart" class="focus-trend-chart" aria-live="polite"></div>
       </section>
       </div>
@@ -379,12 +375,12 @@
         </div>
       </section>
       <section class="panel" id="focusSummary">
-        <h2 class="panel-title">Focus Summary</h2>
+        <h2 class="panel-title">Summary</h2>
         <div class="focus-selected-date" id="focusSelectedDate"></div>
         <div class="focus-total" id="focusTotal">0s</div>
-        <div class="focus-label">Total focus time</div>
+        <div class="focus-label">Total tracked time</div>
         <div id="focusProgress"></div>
-        <button class="ui-control" id="focusTargetBtn" type="button">Add target</button>
+        <button class="ui-control" id="focusTargetBtn" type="button">Add targets</button>
       </section>
       <div id="analyticsWidgets"></div>
     </section>
@@ -555,8 +551,10 @@
 
         <section class="settings-tab" id="tab-tasks" hidden>
           <h3>Categories</h3>
+          <p class="settings-note">Every category lives in one of four fixed domains. Work, Life and Hobbies get a daily target; Entertainment gets a daily limit.</p>
           <div class="field-row">
             <input class="ui-field" type="text" id="newCategoryName" placeholder="New category name..." maxlength="40" aria-label="New category name">
+            <select class="ui-control" id="newCategoryDomain" aria-label="Domain of the new category"></select>
             <button class="ui-control" id="addCat" type="button">Add</button>
           </div>
           <div class="category-editor" id="categoryEditor"></div>
