@@ -920,3 +920,93 @@ button.activity-cell[aria-pressed="true"] {
 .domain-chip .dot {
     flex: none;
 }
+
+/* Trend: legend under the view chips, and the Add View / Edit view modal (card = .task-details) */
+.trend-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--muted);
+    font-size: 12px;
+}
+
+#trendSeriesChips {
+    gap: 14px;
+}
+
+#trendModeChips .domain-chip svg {
+    flex: none;
+}
+
+.view-name {
+    flex: 1;
+    height: 38px;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.view-groups {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.view-group h3 {
+    margin: 0 0 6px;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.view-group .domain-chips {
+    margin-bottom: 0;
+}
+
+/* Saved view chip: the Edit button slides out of its right edge on hover */
+.view-chip {
+    display: inline-flex;
+    align-items: center;
+}
+
+.view-chip .view-edit {
+    max-width: 0;
+    padding: 0;
+    overflow: hidden;
+    border-width: 0;
+    border-radius: 0 var(--radius) var(--radius) 0;
+    opacity: 0;
+    white-space: nowrap;
+    transition: max-width .2s ease, padding .2s ease, opacity .2s ease;
+}
+
+.view-chip:is(:hover, :focus-within) .view-edit {
+    max-width: 64px;
+    padding: 0 12px;
+    border-width: 1px;
+    border-left-width: 0;
+    opacity: 1;
+}
+
+.view-chip:is(:hover, :focus-within) > .domain-chip {
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+}
+
+.view-chip > .ui-control:hover {
+    transform: none;
+}
+
+@media (hover: none) {
+    .view-chip.is-active .view-edit {
+        max-width: 64px;
+        padding: 0 12px;
+        border-width: 1px;
+        border-left-width: 0;
+        opacity: 1;
+    }
+
+    .view-chip.is-active > .domain-chip {
+        border-top-right-radius: 0;
+        border-bottom-right-radius: 0;
+    }
+}

@@ -88,7 +88,7 @@
           </div>
           <div class="panel stat-popover" id="streakPopover" hidden>
             <h2 class="panel-title">Day streak</h2>
-            <p class="settings-note"><b>How to earn</b><br>Complete at least one Work, Life or Hobbies task every day.</p>
+            <p class="settings-note"><b>How to earn</b><br>Complete at least one Work or Hobbies task every day.</p>
             <h3 class="leaderboard-title">Leaderboard</h3>
             <div class="leaderboard" id="streakBoard"></div>
           </div>
@@ -551,7 +551,7 @@
 
         <section class="settings-tab" id="tab-tasks" hidden>
           <h3>Categories</h3>
-          <p class="settings-note">Every category lives in one of four fixed domains. Work, Life and Hobbies get a daily target; Entertainment gets a daily limit.</p>
+          <p class="settings-note">Every category lives in one of three fixed domains. Work and Hobbies get a daily target; Entertainment gets a daily limit.</p>
           <div class="field-row">
             <input class="ui-field" type="text" id="newCategoryName" placeholder="New category name..." maxlength="40" aria-label="New category name">
             <select class="ui-control" id="newCategoryDomain" aria-label="Domain of the new category"></select>
@@ -569,6 +569,8 @@
   <div id="taskModal" class="task-modal" hidden></div>
   <!-- Daily target modal: same card as the task editor -->
   <div id="targetModal" class="task-modal" hidden></div>
+  <!-- Trend view modal (Add View / Edit view): same card as the task editor -->
+  <div id="viewModal" class="task-modal" hidden></div>
 
 
   <!-- Visual effects -->

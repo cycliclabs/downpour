@@ -9,7 +9,8 @@ class FocusStore {
       tasks: [],
       active: null,
       brainDump: "",
-      dailyTargets: {},                          // { "YYYY-MM-DD": { work, life, entertainment (a limit), hobbies } in ms }; {} = skipped that day
+      dailyTargets: {},                          // { "YYYY-MM-DD": { work, entertainment (a limit), hobbies } in ms }; {} = skipped that day
+      trendViews: [],                            // saved Trend views: { id, name, lines: ["d:<domain>" | "c:<category>"] }
       pomodoro: null,
       pomodoroSettings: { focusMinutes: 25, breakMinutes: 5 },
       raindrops: 0,                              // currency earned by completing tasks (see FocusApp.RAINDROPS)
@@ -21,7 +22,19 @@ class FocusStore {
   static migrate(state) {
     const domains = new Set(FocusApp.DOMAINS.map(domain => domain.id));
     const legacy = { school: "work", coding: "work", hobby: "hobbies" };
-    state.categories = (Array.isArray(state.categories) ? state.categories : []).map(category => ({
+    // The Life domain was removed: Exercise moved into Hobbies, every other Life category is dropped (its tasks become uncategorized).
+    const removedIds = new Set();
+    state.categories = (Array.isArray(state.categories) ? state.categories : []).filter(category => {
+      if (category.domain !== "life") return true;
+      if (category.id === "exercise") { category.domain = "hobbies"; return true; }
+      removedIds.add(category.id);
+      return false;
+    });
+    if (removedIds.size) {
+      (Array.isArray(state.tasks) ? state.tasks : []).forEach(task => { if (removedIds.has(task.category)) task.category = ""; });
+      (Array.isArray(state.trackedEntries) ? state.trackedEntries : []).forEach(entry => { if (removedIds.has(entry.category)) entry.category = ""; });
+    }
+    state.categories = state.categories.map(category => ({
       ...category,
       domain: domains.has(category.domain) ? category.domain : (legacy[category.id] || "work")
     }));
@@ -37,7 +50,11 @@ class FocusStore {
     Object.entries(state.dailyTargets && typeof state.dailyTargets === "object" ? state.dailyTargets : {}).forEach(([date, value]) => {
       targets[date] = value && typeof value === "object" ? value : (Number(value) > 0 ? { work: Number(value) } : {});
     });
+    Object.values(targets).forEach(day => { if (day && typeof day === "object") delete day.life; });
     state.dailyTargets = targets;
+    state.trendViews = (Array.isArray(state.trendViews) ? state.trendViews : [])
+      .filter(view => view && typeof view.id === "string" && typeof view.name === "string" && Array.isArray(view.lines))
+      .map(view => ({ id: view.id, name: view.name, lines: view.lines.filter(key => typeof key === "string") }));
     if (!Array.isArray(state.trackedEntries)) state.trackedEntries = [];
     return state;
   }
@@ -126,7 +143,6 @@ class FocusApp {
   //   rewards whether finishing a task here pays raindrops and counts for the streak
   static DOMAINS = [
     { id: "work", name: "Work", color: "#6c8cff", goal: "target", format: "countdown", rewards: true },
-    { id: "life", name: "Life", color: "#2dd4bf", goal: "target", format: "countup", rewards: true },
     { id: "entertainment", name: "Entertainment", color: "#f472b6", goal: "limit", format: "countup", rewards: false },
     { id: "hobbies", name: "Hobbies", color: "#fbbf24", goal: "target", format: "countdown", rewards: true }
   ];
@@ -137,13 +153,7 @@ class FocusApp {
     { id: "coding", name: "Coding", color: "#19a974", domain: "work" },
     { id: "professional", name: "Professional", color: "#3b82f6", domain: "work" },
     { id: "admin", name: "Admin", color: "#94a3b8", domain: "work" },
-    { id: "chores", name: "Chores", color: "#14b8a6", domain: "life" },
-    { id: "cleaning", name: "Cleaning", color: "#22d3ee", domain: "life" },
-    { id: "eating", name: "Eating", color: "#f97316", domain: "life" },
-    { id: "sleep", name: "Sleep", color: "#818cf8", domain: "life" },
-    { id: "exercise", name: "Exercise", color: "#22c55e", domain: "life" },
-    { id: "errands", name: "Errands", color: "#eab308", domain: "life" },
-    { id: "commute", name: "Commute", color: "#64748b", domain: "life" },
+    { id: "exercise", name: "Exercise", color: "#22c55e", domain: "hobbies" },
     { id: "youtube", name: "YouTube", color: "#ef4444", domain: "entertainment", match: { sites: ["youtube.com", "youtu.be"], apps: [] } },
     { id: "instagram", name: "Instagram", color: "#ec4899", domain: "entertainment", match: { sites: ["instagram.com"], apps: ["Instagram"] } },
     { id: "netflix", name: "Netflix", color: "#b91c1c", domain: "entertainment", match: { sites: ["netflix.com"], apps: ["Netflix"] } },
@@ -494,6 +504,11 @@ class FocusApp {
     this.document.addEventListener("keydown", event => {
       if (event.key !== "Escape") return;
       
+      const viewModal = this.document.getElementById("viewModal");
+      if (viewModal && !viewModal.hidden) {
+        this.closeViewModal();
+        return;
+      }
       const targetModal = this.document.getElementById("targetModal");
       if (targetModal && !targetModal.hidden) {
         this.closeTargetModal();
@@ -538,6 +553,8 @@ class FocusApp {
 
       const targetModal = this.document.getElementById("targetModal");
       if (targetModal && !targetModal.hidden && event.target === targetModal) this.closeTargetModal();
+      const viewModal = this.document.getElementById("viewModal");
+      if (viewModal && !viewModal.hidden && event.target === viewModal) this.closeViewModal();
 
       // Close Task Modal / Inline Details
       const modal = this.document.getElementById("taskModal");
@@ -963,7 +980,7 @@ class FocusApp {
       <div class="task-detail-head">
         <h2 class="panel-title task-detail-title">${asking ? "Today's targets" : (hasSaved ? "Edit targets" : "Add targets")}</h2>
       </div>
-      <p class="settings-note target-note">${asking ? "Aim for a target in Work, Life and Hobbies, stay under the limit in Entertainment. Leave a field empty for none." : `${this.escape(this.formatTaskDate(dateKey))} · leave a field empty for none`}</p>
+      <p class="settings-note target-note">${asking ? "Aim for a target in Work and Hobbies, stay under the limit in Entertainment. Leave a field empty for none." : `${this.escape(this.formatTaskDate(dateKey))} · leave a field empty for none`}</p>
       <div class="task-detail-fields">${fields}</div>
       <p class="settings-note is-error" id="targetError" aria-live="polite"></p>
       <div class="task-detail-footer">
@@ -2738,10 +2755,15 @@ class FocusApp {
 
   // Activity heatmap: pick a domain with one tap; a category list for that domain appears next to the year.
   renderActivityFilter(now = Date.now()) {
-    const filter = this.selectedActivityCategory;
-    const domainId = filter === "all" ? "" : filter.startsWith("d:") ? filter.slice(2) : this.domainIdOfCategory(filter);
-    const current = domainId ? `d:${domainId}` : "all";
-    const chips = [["all", "All", ""], ...FocusApp.DOMAINS.map(domain => [`d:${domain.id}`, domain.name, domain.color])]
+    let filter = this.selectedActivityCategory;
+    let domainId = filter.startsWith("d:") ? filter.slice(2) : this.domainIdOfCategory(filter);
+    if (!this.domainInfo(domainId)) {   // "all" (or a removed category) falls back to the first domain
+      domainId = FocusApp.DOMAINS[0].id;
+      filter = `d:${domainId}`;
+      this.selectedActivityCategory = filter;
+    }
+    const current = `d:${domainId}`;
+    const chips = FocusApp.DOMAINS.map(domain => [`d:${domain.id}`, domain.name, domain.color])
       .map(([value, label, color]) => this.chipMarkup(`data-activity-filter="${this.escape(value)}"`, value === current, color, label)).join("");
     const select = this.elements.activityCategoryFilter;
     const wrap = select.closest("label");
@@ -2764,62 +2786,50 @@ class FocusApp {
     if (domain) select.value = filter;
   }
 
-  // Trend lines: tap a domain to see its categories (or "All domains" for one line each), then tap a line's chip to
-  // drop it or use "+ Add line" to compare anything with anything (up to MAX_TREND_LINES).
+  // Trend: one tap picks what the chart shows: every domain, one domain's busiest categories, or a view you saved
+  // (a set of lines made with "Add View"). Saved views live in state.trendViews, so they sync like everything else.
   renderTrendControls(now = Date.now()) {
-    const MAX = FocusApp.MAX_TREND_LINES;
+    const views = this.store.state.trendViews;
+    if (this.trendPreset?.startsWith("v:") && !views.some(view => `v:${view.id}` === this.trendPreset)) {
+      this.trendPreset = "domains";
+      this.selectedTrendCategories = [];
+    }
     if (!this.trendPreset) this.trendPreset = "domains";
-    if (this.selectedTrendCategories.length === 0 && this.trendPreset !== "custom") this.applyTrendPreset(this.trendPreset, now);
+    if (this.selectedTrendCategories.length === 0) this.applyTrendPreset(this.trendPreset, now);
     const selected = this.selectedTrendCategories.filter(key => this.seriesInfo(key));
-    const modes = [["domains", "All domains", ""], ...FocusApp.DOMAINS.map(domain => [`in:${domain.id}`, domain.name, domain.color])];
-    const modeHtml = modes.map(([value, label, color]) => this.chipMarkup(`data-trend-mode="${this.escape(value)}"`, this.trendPreset === value, color, label)).join("");
 
-    const lineChips = selected.map(key => {
+    const presets = [["domains", "All domains", ""], ...FocusApp.DOMAINS.map(domain => [`in:${domain.id}`, domain.name, domain.color])];
+    const presetHtml = presets.map(([value, label, color]) => this.chipMarkup(`data-trend-mode="${this.escape(value)}"`, this.trendPreset === value, color, label)).join("");
+    const plus = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>';
+    const addHtml = `<button type="button" class="ui-control domain-chip" data-trend-add-view>${plus}Add View</button>`;
+    const viewHtml = views.map(view => {
+      const active = this.trendPreset === `v:${view.id}`;
+      return `<span class="view-chip${active ? " is-active" : ""}">${this.chipMarkup(`data-trend-view="${this.escape(view.id)}"`, active, "", view.name)}<button type="button" class="ui-control view-edit" data-trend-edit-view="${this.escape(view.id)}" aria-label="Edit view ${this.escape(view.name)}">Edit</button></span>`;
+    }).join("");
+    const legend = selected.map(key => {
       const info = this.seriesInfo(key);
-      return this.chipMarkup(`data-trend-remove="${this.escape(key)}" title="Remove this line"`, false, this.readableColor(info.color),
-        key.startsWith("d:") ? `${info.name} (all)` : info.name, ' <span style="color:var(--muted)">×</span>');
+      return `<span class="trend-legend-item"><span class="dot" style="background:${this.escape(this.readableColor(info.color))}"></span>${this.escape(key.startsWith("d:") ? `${info.name} (all)` : info.name)}</span>`;
     }).join("");
-    const groups = FocusApp.DOMAINS.map(domain => {
-      const keys = [[`d:${domain.id}`, `${domain.name} (everything)`],
-        ...this.store.state.categories.filter(category => category.domain === domain.id).map(category => [`c:${category.id}`, category.name])]
-        .filter(([key]) => !selected.includes(key));
-      return keys.length ? `<optgroup label="${this.escape(domain.name)}">${keys.map(([key, label]) => `<option value="${this.escape(key)}">${this.escape(label)}</option>`).join("")}</optgroup>` : "";
-    }).join("");
-    const add = selected.length >= MAX
-      ? `<span class="settings-note" style="margin:0">Up to ${MAX} lines</span>`
-      : `<select class="ui-control" id="trendAddLine" aria-label="Add a line to the trend"><option value="">+ Add line</option>${groups}</select>`;
 
-    const html = `${modeHtml}|${lineChips}|${add}`;
+    const html = `${presetHtml}|${viewHtml}|${addHtml}|${legend}`;
     if (html === this.lastTrendControlsHtml) return;
     this.lastTrendControlsHtml = html;
-    this.elements.trendModeChips.innerHTML = modeHtml;
-    this.elements.trendSeriesChips.innerHTML = lineChips + add;
-    this.elements.trendModeChips.querySelectorAll("[data-trend-mode]").forEach(button => {
-      button.onclick = () => {
-        this.trendPreset = button.dataset.trendMode;
-        this.applyTrendPreset(this.trendPreset, Date.now());
-        this.renderActivityTrend();
-      };
-    });
-    this.elements.trendSeriesChips.querySelectorAll("[data-trend-remove]").forEach(button => {
-      button.onclick = () => {
-        this.selectedTrendCategories = this.selectedTrendCategories.filter(key => key !== button.dataset.trendRemove);
-        this.trendPreset = "custom";
-        this.renderActivityTrend();
-      };
-    });
-    const addSelect = this.elements.trendSeriesChips.querySelector("#trendAddLine");
-    if (addSelect) addSelect.onchange = () => {
-      if (!addSelect.value) return;
-      this.selectedTrendCategories = [...selected, addSelect.value];
-      this.trendPreset = "custom";
-      this.renderActivityTrend();
-    };
+    const bar = this.elements.trendModeChips;
+    bar.innerHTML = presetHtml + viewHtml + addHtml;
+    this.elements.trendSeriesChips.innerHTML = legend;
+    const choose = preset => { this.trendPreset = preset; this.applyTrendPreset(preset, Date.now()); this.renderActivityTrend(); };
+    bar.querySelectorAll("[data-trend-mode]").forEach(button => { button.onclick = () => choose(button.dataset.trendMode); });
+    bar.querySelectorAll("[data-trend-view]").forEach(button => { button.onclick = () => choose(`v:${button.dataset.trendView}`); });
+    bar.querySelector("[data-trend-add-view]").onclick = () => this.openViewModal();
+    bar.querySelectorAll("[data-trend-edit-view]").forEach(button => { button.onclick = () => this.openViewModal(button.dataset.trendEditView); });
   }
 
-  // "All domains": one line per domain. "Inside <domain>": its five busiest categories.
+  // "All domains": one line per domain. "Inside <domain>": its busiest categories. "v:<id>": a saved view.
   applyTrendPreset(preset, now = Date.now()) {
-    if (preset.startsWith("in:")) {
+    if (preset.startsWith("v:")) {
+      const view = this.store.state.trendViews.find(item => `v:${item.id}` === preset);
+      this.selectedTrendCategories = (view?.lines || []).filter(key => this.seriesInfo(key)).slice(0, FocusApp.MAX_TREND_LINES);
+    } else if (preset.startsWith("in:")) {
       const domainId = preset.slice(3);
       const totals = new Map();
       this.allSpans(now).forEach(span => { if (span.domain === domainId) totals.set(span.category, (totals.get(span.category) || 0) + span.end - span.start); });
@@ -2829,6 +2839,91 @@ class FocusApp {
       this.selectedTrendCategories = FocusApp.DOMAINS.map(domain => `d:${domain.id}`);
     }
   }
+
+  deleteTrendView(id) {
+    const view = this.store.state.trendViews.find(item => item.id === id);
+    if (!view || !window.confirm(`Delete the view "${view.name}"?`)) return false;
+    this.store.state.trendViews = this.store.state.trendViews.filter(item => item.id !== id);
+    this.store.save();
+    if (this.trendPreset === `v:${id}`) { this.trendPreset = "domains"; this.selectedTrendCategories = []; }
+    this.renderActivityTrend();
+    return true;
+  }
+
+  // Same card as the task and target editors (.task-details inside .task-modal).
+  openViewModal(viewId = null) {
+    this.closeTaskModal();
+    const modal = this.document.getElementById("viewModal");
+    const existing = viewId ? this.store.state.trendViews.find(view => view.id === viewId) : null;
+    const MAX = FocusApp.MAX_TREND_LINES;
+    const chosen = new Set((existing?.lines || []).filter(key => this.seriesInfo(key)));
+    const groups = FocusApp.DOMAINS.map(domain => {
+      const lines = [[`d:${domain.id}`, `All ${domain.name}`, domain.color],
+        ...this.store.state.categories.filter(category => category.domain === domain.id).map(category => [`c:${category.id}`, category.name, category.color])];
+      return `<section class="view-group"><h3>${this.escape(domain.name)}</h3><div class="domain-chips">${
+        lines.map(([key, label, color]) => this.chipMarkup(`data-line="${this.escape(key)}"`, chosen.has(key), this.readableColor(color), label)).join("")}</div></section>`;
+    }).join("");
+    modal.innerHTML = `<div class="task-details" role="dialog" aria-modal="true" aria-label="${existing ? "Edit view" : "Add view"}">
+      <div class="task-detail-head">
+        <input class="ui-field view-name" id="viewName" type="text" maxlength="30" placeholder="Name this view" aria-label="View name" value="${this.escape(existing?.name || "")}">
+      </div>
+      <p class="settings-note" id="viewCount"></p>
+      <div class="view-groups">${groups}</div>
+      <p class="settings-note is-error" id="viewError" aria-live="polite"></p>
+      <div class="task-detail-footer">
+        ${existing ? '<button class="ui-control" type="button" data-action="delete">Delete</button>' : ""}
+        <button class="ui-control" type="button" data-action="cancel">Cancel</button>
+        <button class="ui-control" type="button" data-action="save">${existing ? "Save" : "Add view"}</button>
+      </div>
+    </div>`;
+    modal.hidden = false;
+    const error = modal.querySelector("#viewError");
+    const nameInput = modal.querySelector("#viewName");
+    const count = () => { modal.querySelector("#viewCount").textContent = `Pick the lines to show · ${chosen.size} of ${MAX} selected`; };
+    count();
+    modal.querySelectorAll("[data-line]").forEach(chip => {
+      chip.onclick = () => {
+        const key = chip.dataset.line;
+        error.textContent = "";
+        if (chosen.has(key)) chosen.delete(key);
+        else if (chosen.size >= MAX) { error.textContent = `A view can show up to ${MAX} lines.`; return; }
+        else chosen.add(key);
+        chip.classList.toggle("is-active", chosen.has(key));
+        chip.setAttribute("aria-pressed", String(chosen.has(key)));
+        count();
+      };
+    });
+    modal.querySelector('[data-action="cancel"]').onclick = () => this.closeViewModal();
+    const remove = modal.querySelector('[data-action="delete"]');
+    if (remove) remove.onclick = () => { if (this.deleteTrendView(existing.id)) this.closeViewModal(); };
+    const save = () => {
+      const name = nameInput.value.trim();
+      if (!name) { error.textContent = "Give the view a name."; nameInput.focus(); return; }
+      if (!chosen.size) { error.textContent = "Pick at least one line."; return; }
+      let view = existing;
+      if (view) { view.name = name; view.lines = [...chosen]; }
+      else {
+        view = { id: `v${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, name, lines: [...chosen] };
+        this.store.state.trendViews.push(view);
+      }
+      this.store.save();
+      this.closeViewModal();
+      this.trendPreset = `v:${view.id}`;
+      this.applyTrendPreset(this.trendPreset, Date.now());
+      this.renderActivityTrend();
+    };
+    modal.querySelector('[data-action="save"]').onclick = save;
+    nameInput.onkeydown = event => { if (event.key === "Enter") { event.preventDefault(); save(); } };
+    window.setTimeout(() => nameInput.focus(), 50);
+  }
+
+  closeViewModal() {
+    const modal = this.document.getElementById("viewModal");
+    if (!modal || modal.hidden) return;
+    modal.innerHTML = "";
+    modal.hidden = true;
+  }
+
   focusDurationOnDate(task, dateKey, now = Date.now()) {
     if (!this.isDateKey(dateKey)) return 0;
     const [year, month, day] = dateKey.split("-").map(Number);
