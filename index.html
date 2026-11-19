@@ -361,8 +361,8 @@
           </div>
         </div>
         <div class="domain-chips" id="trendModeChips" role="group" aria-label="What the trend shows"></div>
-        <div class="domain-chips" id="trendSeriesChips" role="group" aria-label="Lines in the trend"></div>
         <div id="activityTrendChart" class="focus-trend-chart" aria-live="polite"></div>
+        <div class="domain-chips trend-legend" id="trendSeriesChips" role="group" aria-label="Lines in the trend. Full lines are domains, dotted lines are categories."></div>
       </section>
       </div>
       <section class="panel" id="timeLine" aria-labelledby="calendarTitle">
@@ -375,7 +375,10 @@
         </div>
       </section>
       <section class="panel" id="focusSummary">
-        <h2 class="panel-title">Summary</h2>
+        <div class="widget-head">
+          <h2 class="panel-title">Summary</h2>
+          <select class="ui-control" id="summaryDomain" aria-label="Summary: domain"></select>
+        </div>
         <div class="focus-selected-date" id="focusSelectedDate"></div>
         <div class="focus-total" id="focusTotal">0s</div>
         <div class="focus-label">Total tracked time</div>

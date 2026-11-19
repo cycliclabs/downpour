@@ -33,16 +33,16 @@
 }
 
 #focusActivity {
-    flex: 0 1 880px;
+    flex: 1 1 56%;
 }
 
 .focus-trend {
-    flex: 1 1 320px;
+    flex: 1 1 44%;
 }
 
 #timeLine {
     grid-column: 1;
-    grid-row: span 3;
+    grid-row: span 2;
 }
 
 @media (max-width: 1100px) {
@@ -114,7 +114,7 @@
     display: flex;
     flex-direction: column;
     min-height: 300px;
-    padding: 20px;
+    padding: 18px;
     --activity-cell-size: 12px;
     --activity-cell-gap: 2px;
 }
@@ -218,7 +218,8 @@ button.activity-cell {
     cursor: pointer
 }
 
-button.activity-cell:hover {
+button.activity-cell:hover,
+.activity-legend .activity-cell:hover {
     outline: 1px solid var(--text);
     outline-offset: 1px;
     position: relative;
@@ -289,7 +290,7 @@ button.activity-cell[aria-pressed="true"] {
 .focus-trend {
     width: 100%;
     min-width: 0;
-    padding: 20px;
+    padding: 18px;
     min-height: 300px;
 }
 
@@ -374,7 +375,7 @@ button.activity-cell[aria-pressed="true"] {
 }
 
 /* draw-in, only when the chart's subject changed (not on the once-a-minute refresh) */
-.focus-trend-chart.is-animated .trend-line {
+.focus-trend-chart.is-animated .trend-line:not(.is-dotted) {
     stroke-dasharray: 1;
     stroke-dashoffset: 1;
     animation: trend-draw .9s cubic-bezier(.4, 0, .2, 1) forwards;
@@ -441,9 +442,7 @@ button.activity-cell[aria-pressed="true"] {
 
 .trend-tip-when {
     color: var(--muted);
-    font-size: 10px;
-    letter-spacing: .04em;
-    text-transform: uppercase;
+    font-size: 11px;
 }
 
 .trend-tip-row {
@@ -579,7 +578,7 @@ button.activity-cell[aria-pressed="true"] {
 
 .timeline-scroll {
     flex: 1 1 0;
-    min-height: 480px;
+    min-height: 320px;
     overflow-y: auto;
     overflow-x: hidden;
     overscroll-behavior: contain;
@@ -664,11 +663,11 @@ button.activity-cell[aria-pressed="true"] {
 
 #focusSummary,
 #analyticsWidgets > .panel {
-    padding: 20px;
+    padding: 18px;
 }
 
 .focus-total {
-    font-size: 30px;
+    font-size: 26px;
     font-weight: 700;
     letter-spacing: -1px;
     margin: 4px 0 0
@@ -677,7 +676,7 @@ button.activity-cell[aria-pressed="true"] {
 .focus-label {
     color: var(--muted);
     font-size: 12px;
-    margin-bottom: 18px
+    margin-bottom: 14px
 }
 
 .focus-goal-label {
@@ -1009,4 +1008,51 @@ button.activity-cell[aria-pressed="true"] {
         border-top-right-radius: 0;
         border-bottom-right-radius: 0;
     }
+}
+
+/* Activity hover box: the shared .focus-goal-tip, floating on <body> */
+.floating-tip {
+    position: fixed;
+    bottom: auto;
+    z-index: 1600;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+}
+
+/* Trend lines: full = domain, dotted = category */
+.focus-trend-svg .trend-line.is-dotted {
+    stroke-width: 2.6;
+    stroke-dasharray: .01 6.5;
+}
+
+.focus-trend-chart.is-animated .trend-line.is-dotted {
+    opacity: 0;
+    animation: trend-fade .6s ease .3s forwards;
+}
+
+.focus-trend-svg .trend-series {
+    transition: opacity .2s ease;
+}
+
+.focus-trend-chart.is-dimming .trend-series:not(.is-hot) {
+    opacity: .12;
+}
+
+.trend-legend {
+    margin: 10px 0 0;
+}
+
+.line-swatch {
+    flex: none;
+    display: block;
+}
+
+/* Card header: title left, the standard .ui-control select right */
+.widget-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-height: 32px;
 }

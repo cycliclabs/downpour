@@ -210,6 +210,8 @@ class FocusApp {
     this.renderBackgroundChoices();
     this.selectedActivityCategory = "all";
     this.selectedTrendCategories = [];
+    this.widgetDomains = (() => { try { return JSON.parse(localStorage.getItem("focus-widget-domains") || "{}") || {}; } catch { return {}; } })();
+    this.glassTip = null;
     this.selectedCategory = "all";
     this.hideCompleted = false;
     const savedBackground = localStorage.getItem("focus-background-image");
@@ -332,6 +334,7 @@ class FocusApp {
       focusTotal: query("#focusTotal"),
       focusProgress: query("#focusProgress"),
       focusTargetBtn: query("#focusTargetBtn"),
+      summaryDomain: query("#summaryDomain"),
       activityMonths: query("#activityMonths"),
       activityGrid: query("#activityGrid"),
       activityLegend: query(".activity-legend"),
@@ -492,6 +495,12 @@ class FocusApp {
       if (event.key === "Enter") this.applyBackgroundVideoInput();
     };
     this.elements.focusTargetBtn.onclick = () => this.openTargetModal(this.elements.focusTargetBtn.dataset.date || this.today());
+    this.elements.summaryDomain.onchange = () => this.setWidgetDomain("summary", this.elements.summaryDomain.value);
+    this.elements.analyticsWidgets.addEventListener("change", event => {
+      const select = event.target.closest?.("select[data-widget]");
+      if (select) this.setWidgetDomain(select.dataset.widget, select.value);
+    });
+    this.bindActivityTips();
     this.elements.backgroundVideoClear.onclick = () => this.setBackgroundVideo(null);
 
     this.elements.activityCategoryFilter.onchange = (e) => {
@@ -2187,19 +2196,28 @@ class FocusApp {
     });
 
     this.elements.focusSelectedDate.textContent = this.formatTaskDate(activeDate);
-    this.elements.focusTotal.textContent = this.duration(totalMilliseconds);
     const targets = this.targetsFor(activeDate);
     const hasTargets = Object.keys(targets).length > 0;
     this.elements.focusTargetBtn.textContent = hasTargets ? "Edit targets" : "Add targets";
     this.elements.focusTargetBtn.dataset.date = activeDate;
 
-    const groups = FocusApp.DOMAINS.map(domain => {
+    let groups = FocusApp.DOMAINS.map(domain => {
       const inside = categories.filter(category => category.domain === domain.id)
         .map(category => ({ ...category, milliseconds: perCategory.get(category.id) || 0 }));
       return { domain, inside, milliseconds: inside.reduce((sum, category) => sum + category.milliseconds, 0), target: Number(targets[domain.id]) || 0 };
     });
     const loose = totalMilliseconds - groups.reduce((sum, group) => sum + group.milliseconds, 0);   // no category (or a removed one)
     if (loose > 0) groups.push({ domain: { id: "", name: "Uncategorized", color: "#999", goal: "none" }, inside: [{ id: "", name: "Uncategorized", color: "#999", milliseconds: loose }], milliseconds: loose, target: 0 });
+
+    const only = this.widgetDomain("summary");
+    if (only !== "all") {
+      groups = groups.filter(group => group.domain.id === only);
+      totalMilliseconds = groups.reduce((sum, group) => sum + group.milliseconds, 0);
+    }
+    this.elements.focusTotal.textContent = this.duration(totalMilliseconds);
+    const summarySelect = this.elements.summaryDomain;
+    if (!summarySelect.options.length) summarySelect.innerHTML = this.domainOptions();
+    summarySelect.value = only;
 
     // One bar per domain, fragmented by category. With a target a segment's width is its share of the target (or of the
     // domain's time once it is exceeded, so the bar never overflows). Without one the bar shows the domain's share of the day.
@@ -2223,7 +2241,7 @@ class FocusApp {
       ? `<div class="focus-legend" aria-label="Category colours">${withTime.map(category =>
         `<span class="focus-legend-item"><span class="dot" style="background:${this.escape(category.color)}"></span>${this.escape(category.name)}</span>`).join("")}</div>`
       : "";
-    const html = rows ? `${rows}${legend}` : `<div class="focus-goal-empty">Nothing tracked and no targets for this day.</div>`;
+    const html = rows ? `${rows}${legend}` : `<div class="focus-goal-empty">Nothing tracked${only === "all" ? "" : " here"} and no targets for this day.</div>`;
     if (html === this.lastSummaryHtml) return;        // runs every second: don't rebuild (and reset the hover tip) for nothing
     this.lastSummaryHtml = html;
     this.elements.focusProgress.innerHTML = html;
@@ -2244,11 +2262,13 @@ class FocusApp {
   // ---- Analytics widgets ---------------------------------------------------------
   // Built only from parts the page already has: .panel, .panel-title, .focus-total + .focus-label
   // (the big number) and .focus-goal-label + .focus-goal-track (a labelled row, optionally with a bar).
-  analyticsData(now = Date.now()) {
-    const { tasks, categories } = this.store.state;
+  analyticsData(now = Date.now(), domainId = "all") {
+    const categories = this.store.state.categories;
+    const tasks = domainId === "all" ? this.store.state.tasks : this.store.state.tasks.filter(task => this.domainIdOfTask(task) === domainId);
     const perDay = new Map(), perCategory = new Map(), perTask = new Map(), perDomain = new Map();
     const perHour = Array(24).fill(0);
     this.allSpans(now).forEach(span => {
+      if (domainId !== "all" && span.domain !== domainId) return;
       const a = span.start, b = span.end;
       const add = (map, key) => map.set(key, (map.get(key) || 0) + (b - a));
       if (span.taskId) add(perTask, span.taskId);
@@ -2267,70 +2287,104 @@ class FocusApp {
     return { tasks, categories, perDay, perCategory, perTask, perDomain, perHour };
   }
 
+  // Per-card domain choice (All / Work / ...), remembered on this device.
+  widgetDomain(key) {
+    const value = this.widgetDomains?.[key];
+    return value && this.domainInfo(value) ? value : "all";
+  }
+
+  domainOptions() {
+    return `<option value="all">All domains</option>${FocusApp.DOMAINS.map(domain => `<option value="${domain.id}">${this.escape(domain.name)}</option>`).join("")}`;
+  }
+
+  setWidgetDomain(key, value) {
+    this.widgetDomains[key] = value;
+    try { localStorage.setItem("focus-widget-domains", JSON.stringify(this.widgetDomains)); } catch { /* storage blocked */ }
+    this.lastSummaryHtml = null;
+    this.lastWidgetsHtml = null;
+    this.renderFocusSummary();
+    this.renderAnalyticsWidgets();
+  }
+
   renderAnalyticsWidgets() {
     const host = this.elements.analyticsWidgets;
     if (!host || this.document.body.dataset.page !== "analytics") return;
-    const d = this.analyticsData();
     const dur = ms => this.duration(ms);
     const sum = list => list.reduce((total, ms) => total + ms, 0);
     const pct = (part, whole) => whole > 0 ? Math.round((part / whole) * 100) : 0;
     const dayKey = offset => { const x = new Date(); x.setDate(x.getDate() - offset); return this.dateKey(x); };
-    const dayTotal = key => d.perDay.get(key) || 0;
-    const totalMs = sum([...d.perDay.values()]);
     const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
     const hourLabel = h => `${h % 12 || 12} ${h < 12 ? "AM" : "PM"}`;
     const change = (now, before) => before > 0 ? `${now >= before ? "+" : ""}${Math.round(((now - before) / before) * 100)}%` : "–";
-
-    // this week (since Monday) vs last week
-    const mondayOffset = (new Date().getDay() + 6) % 7;
-    const thisWeek = sum(Array.from({ length: mondayOffset + 1 }, (_, i) => dayTotal(dayKey(i))));
-    const lastWeek = sum(Array.from({ length: 7 }, (_, i) => dayTotal(dayKey(mondayOffset + 1 + i))));
-    const activeDays = [...d.perDay].filter(([, v]) => v > 0).length;
-
-    // time of day, day of week
-    const buckets = [["Morning · 5–12", 5, 12], ["Afternoon · 12–17", 12, 17], ["Evening · 17–22", 17, 22], ["Night · 22–5", 22, 29]]
-      .map(([label, from, to]) => ({ label, value: sum(Array.from({ length: to - from }, (_, i) => d.perHour[(from + i) % 24])) }));
-    const peakHour = d.perHour.indexOf(Math.max(...d.perHour));
-    const weekdayTotals = Array(7).fill(0);
-    d.perDay.forEach((ms, key) => { weekdayTotals[(new Date(`${key}T00:00:00`).getDay() + 6) % 7] += ms; });
-    const bestWeekday = weekdayTotals.indexOf(Math.max(...weekdayTotals));
-
-    // categories
-    const catName = id => d.categories.find(c => c.id === id)?.name || "Uncategorized";
-    const catColor = id => d.categories.find(c => c.id === id)?.color || "#999";
-    const catRows = [...d.perCategory].sort((x, y) => y[1] - x[1]).slice(0, 5);
-
-    // estimates: finished tasks that had an estimate and real focus time
-    const [lo, hi] = FocusApp.RAINDROPS.onTargetBand;
-    const rated = d.tasks.filter(t => t.done && t.estimateMs > 0 && (d.perTask.get(t.id) || 0) >= FocusApp.RAINDROPS.minFocusMs);
-    const ratio = t => (d.perTask.get(t.id) || 0) / t.estimateMs;
-    const faster = rated.filter(t => ratio(t) < lo).length;
-    const slower = rated.filter(t => ratio(t) > hi).length;
-    const onTarget = rated.length - faster - slower;
-
+    const cache = new Map();
+    const dataFor = id => { if (!cache.has(id)) cache.set(id, this.analyticsData(Date.now(), id)); return cache.get(id); };
+    const totalOf = d => sum([...d.perDay.values()]);
     const bars = (items, fmt = dur) => {
       const max = Math.max(0, ...items.map(i => i.value));
       return items.map(i => ({ label: i.label, value: fmt(i.value), bar: max > 0 ? (i.value / max) * 100 : 0, color: i.color || "var(--rain)" }));
     };
-    const domainRows = FocusApp.DOMAINS.map(domain => ({ label: domain.name, value: d.perDomain.get(domain.id) || 0, color: domain.color }));
-    const topDomain = [...domainRows].sort((x, y) => y.value - x.value)[0];
-    const widgets = [
-      { title: "Domains", big: topDomain && topDomain.value > 0 ? topDomain.label : "–", label: "Where your time goes, all time",
-        rows: bars(domainRows, ms => `${dur(ms)} · ${pct(ms, totalMs)}%`) },
-      { title: "This week", big: dur(thisWeek), label: "Time tracked since Monday", rows: [
-        ...bars([{ label: "This week", value: thisWeek }, { label: "Last week", value: lastWeek }]),
-        { label: "Change", value: change(thisWeek, lastWeek) }, { label: "Days tracked, all time", value: activeDays }] },
-      { title: "Time of day", big: totalMs ? hourLabel(peakHour) : "–", label: "Most active hour", rows: bars(buckets) },
-      { title: "Day of week", big: totalMs ? dayNames[bestWeekday] : "–", label: "Most active weekday", rows: bars(dayNames.map((label, i) => ({ label, value: weekdayTotals[i] }))) },
-      { title: "Categories", big: catRows.length ? catName(catRows[0][0]) : "–", label: "Most tracked category, all time",
-        rows: bars(catRows.map(([id, ms]) => ({ label: catName(id), value: ms, color: catColor(id) })), ms => `${dur(ms)} · ${pct(ms, totalMs)}%`) },
-      { title: "Estimates", big: rated.length ? `${pct(onTarget, rated.length)}%` : "–", label: "Finished tasks on target", rows:
-        bars([{ label: "Faster than estimated", value: faster }, { label: "On target", value: onTarget }, { label: "Slower than estimated", value: slower }], String) }
-    ];
+
+    const build = {
+      domains: id => {
+        const d = dataFor(id), allTotal = totalOf(dataFor("all"));
+        if (id === "all") {
+          const rows = FocusApp.DOMAINS.map(domain => ({ label: domain.name, value: d.perDomain.get(domain.id) || 0, color: domain.color }));
+          const top = [...rows].sort((x, y) => y.value - x.value)[0];
+          return { title: "Domains", big: top && top.value > 0 ? top.label : "–", label: "Where your time goes, all time", rows: bars(rows, ms => `${dur(ms)} · ${pct(ms, allTotal)}%`) };
+        }
+        const domain = this.domainInfo(id), total = d.perDomain.get(id) || 0;
+        const rows = d.categories.filter(category => category.domain === id).map(category => ({ label: category.name, value: d.perCategory.get(category.id) || 0, color: category.color })).sort((x, y) => y.value - x.value);
+        return { title: "Domains", big: domain.name, label: `${pct(total, allTotal)}% of all tracked time`, rows: bars(rows, ms => `${dur(ms)} · ${pct(ms, total)}%`) };
+      },
+      week: id => {
+        const d = dataFor(id), dayTotal = key => d.perDay.get(key) || 0;
+        const mondayOffset = (new Date().getDay() + 6) % 7;
+        const thisWeek = sum(Array.from({ length: mondayOffset + 1 }, (_, i) => dayTotal(dayKey(i))));
+        const lastWeek = sum(Array.from({ length: 7 }, (_, i) => dayTotal(dayKey(mondayOffset + 1 + i))));
+        const activeDays = [...d.perDay].filter(([, v]) => v > 0).length;
+        return { title: "This week", big: dur(thisWeek), label: "Time tracked since Monday", rows: [
+          ...bars([{ label: "This week", value: thisWeek }, { label: "Last week", value: lastWeek }]),
+          { label: "Change", value: change(thisWeek, lastWeek) }, { label: "Days tracked, all time", value: activeDays }] };
+      },
+      timeOfDay: id => {
+        const d = dataFor(id);
+        const buckets = [["Morning · 5–12", 5, 12], ["Afternoon · 12–17", 12, 17], ["Evening · 17–22", 17, 22], ["Night · 22–5", 22, 29]]
+          .map(([label, from, to]) => ({ label, value: sum(Array.from({ length: to - from }, (_, i) => d.perHour[(from + i) % 24])) }));
+        return { title: "Time of day", big: totalOf(d) ? hourLabel(d.perHour.indexOf(Math.max(...d.perHour))) : "–", label: "Most active hour", rows: bars(buckets) };
+      },
+      dayOfWeek: id => {
+        const d = dataFor(id), totals = Array(7).fill(0);
+        d.perDay.forEach((ms, key) => { totals[(new Date(`${key}T00:00:00`).getDay() + 6) % 7] += ms; });
+        return { title: "Day of week", big: totalOf(d) ? dayNames[totals.indexOf(Math.max(...totals))] : "–", label: "Most active weekday", rows: bars(dayNames.map((label, i) => ({ label, value: totals[i] }))) };
+      },
+      categories: id => {
+        const d = dataFor(id), total = totalOf(d);
+        const name = cid => d.categories.find(c => c.id === cid)?.name || "Uncategorized";
+        const color = cid => d.categories.find(c => c.id === cid)?.color || "#999";
+        const rows = [...d.perCategory].sort((x, y) => y[1] - x[1]).slice(0, 5);
+        return { title: "Categories", big: rows.length ? name(rows[0][0]) : "–", label: "Most tracked category, all time",
+          rows: bars(rows.map(([cid, ms]) => ({ label: name(cid), value: ms, color: color(cid) })), ms => `${dur(ms)} · ${pct(ms, total)}%`) };
+      },
+      estimates: id => {
+        const d = dataFor(id);
+        const [lo, hi] = FocusApp.RAINDROPS.onTargetBand;
+        const rated = d.tasks.filter(t => t.done && t.estimateMs > 0 && (d.perTask.get(t.id) || 0) >= FocusApp.RAINDROPS.minFocusMs);
+        const ratio = t => (d.perTask.get(t.id) || 0) / t.estimateMs;
+        const faster = rated.filter(t => ratio(t) < lo).length;
+        const slower = rated.filter(t => ratio(t) > hi).length;
+        const onTarget = rated.length - faster - slower;
+        return { title: "Estimates", big: rated.length ? `${pct(onTarget, rated.length)}%` : "–", label: "Finished tasks on target", rows:
+          bars([{ label: "Faster than estimated", value: faster }, { label: "On target", value: onTarget }, { label: "Slower than estimated", value: slower }], String) };
+      }
+    };
 
     const row = r => `<div class="focus-goal-label"><span>${this.escape(r.label)}</span><span>${this.escape(r.value)}</span></div>${
       r.bar === undefined ? "" : `<div class="focus-goal-track"><span class="focus-goal-segment" style="width:${r.bar}%;background:${this.escape(r.color)}"></span></div>`}`;
-    const html = widgets.map(w => `<section class="panel"><h2 class="panel-title">${this.escape(w.title)}</h2><div class="focus-total">${this.escape(w.big)}</div><div class="focus-label">${this.escape(w.label)}</div>${w.rows.map(row).join("")}</section>`).join("");
+    const html = Object.entries(build).map(([key, make]) => {
+      const id = this.widgetDomain(key), w = make(id);
+      const select = `<select class="ui-control" data-widget="${key}" aria-label="${this.escape(w.title)}: domain">${this.domainOptions().replace(`value="${id}"`, `value="${id}" selected`)}</select>`;
+      return `<section class="panel"><div class="widget-head"><h2 class="panel-title">${this.escape(w.title)}</h2>${select}</div><div class="focus-total">${this.escape(w.big)}</div><div class="focus-label">${this.escape(w.label)}</div>${w.rows.map(row).join("")}</section>`;
+    }).join("");
     if (html !== this.lastWidgetsHtml) { host.innerHTML = html; this.lastWidgetsHtml = html; }
   }
 
@@ -2389,6 +2443,52 @@ class FocusApp {
     const { L, C, H } = this.toOklch(color);
     if (L >= 0.62) return this.fromOklch(L, C, H);
     return this.fromOklch(0.68, Math.max(C, 0.1), H);
+  }
+
+  // One floating glass box for hover info (activity cells and legend). Lives on <body> so no panel clips or re-anchors it.
+  showGlassTip(html, anchor) {
+    if (!this.glassTip) {
+      this.glassTip = this.document.createElement("div");
+      this.glassTip.className = "focus-goal-tip floating-tip";
+      this.glassTip.hidden = true;
+      this.document.body.append(this.glassTip);
+    }
+    const tip = this.glassTip;
+    tip.innerHTML = html;
+    tip.hidden = false;
+    const box = anchor.getBoundingClientRect();
+    const half = tip.offsetWidth / 2;
+    const x = Math.min(Math.max(box.left + box.width / 2, half + 8), window.innerWidth - half - 8);
+    const above = box.top - tip.offsetHeight - 10 >= 8;
+    tip.style.left = `${x}px`;
+    tip.style.top = `${above ? box.top - tip.offsetHeight - 10 : box.bottom + 10}px`;
+  }
+
+  hideGlassTip() { if (this.glassTip) this.glassTip.hidden = true; }
+
+  bindActivityTips() {
+    const card = this.elements.activityCard;
+    const cellOf = event => event.target.closest?.(".activity-cell[data-level]");
+    const show = cell => {
+      const stats = this.activityStats;
+      if (!stats) return;
+      const dot = `<span class="dot" style="background:${this.escape(stats.color)}"></span>`;
+      if (cell.dataset.activityDate) {
+        const ms = Number(cell.dataset.ms) || 0;
+        const when = new Date(`${cell.dataset.activityDate}T00:00:00`).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+        this.showGlassTip(`<span class="trend-tip-when">${this.escape(when)}</span><span class="trend-tip-row">${dot}<b>${this.escape(stats.name)}</b> ${ms > 0 ? this.escape(this.duration(ms)) : "nothing tracked"}</span>`, cell);
+        return;
+      }
+      const level = Number(cell.dataset.level);
+      const entry = stats.levels[level];
+      const days = `${entry.days} ${entry.days === 1 ? "day" : "days"}`;
+      const detail = level === 0 ? days : `${days} · ${this.duration(entry.ms)} total`;
+      this.showGlassTip(`<span class="trend-tip-when">${this.escape(stats.ranges[level])}</span><span class="trend-tip-row">${dot}<b>${this.escape(stats.name)}</b> ${this.escape(detail)}</span>`, cell);
+    };
+    card.addEventListener("mouseover", event => { const cell = cellOf(event); if (cell) show(cell); else this.hideGlassTip(); });
+    card.addEventListener("mouseleave", () => this.hideGlassTip());
+    card.addEventListener("focusin", event => { const cell = cellOf(event); if (cell) show(cell); });
+    card.addEventListener("focusout", () => this.hideGlassTip());
   }
 
   renderActivityCalendar(now = Date.now()) {
@@ -2473,12 +2573,21 @@ class FocusApp {
     };
 
     // --- 5. Render Grid with NEW Dynamic Colors ---
+    // What each shade means, and how much time (and how many days) landed in it: shown when hovering the legend.
+    const levels = Array.from({ length: 6 }, () => ({ days: 0, ms: 0 }));
+    this.activityStats = {
+      name: (this.selectedActivityCategory.startsWith("d:") ? this.domainInfo(this.selectedActivityCategory.slice(2))?.name : this.categoryOf(this.selectedActivityCategory)?.name) || "All time",
+      color: this.readableColor(selectedColor || "#39d353"),
+      ranges: ["No time tracked", "Under 30m a day", "30m – 2h a day", "2h – 5h a day", "5h – 8h a day", "8h+ a day"],
+      levels
+    };
     this.elements.activityGrid.innerHTML = dateKeys.map(date => {
       if (!date) return '<span class="activity-cell activity-padding" aria-hidden="true"></span>';
       const milliseconds = totals.get(date);
       const level = levelFor(milliseconds);
-      
-      return `<button class="activity-cell" type="button" data-activity-date="${date}" data-level="${level}" aria-label="${this.escape(this.formatTaskDate(date))}: ${this.escape(this.duration(milliseconds))} tracked time" aria-pressed="${date === this.selectedDate}" title="${this.escape(this.formatTaskDate(date))}: ${this.escape(this.duration(milliseconds))}"></button>`;
+      levels[level].days += 1;
+      levels[level].ms += milliseconds;
+      return `<button class="activity-cell" type="button" data-activity-date="${date}" data-level="${level}" data-ms="${milliseconds}" aria-label="${this.escape(this.formatTaskDate(date))}: ${this.escape(this.duration(milliseconds))} tracked time" aria-pressed="${date === this.selectedDate}"></button>`;
     }).join("");
 
     // --- 6. Existing Month Labels & Bindings ---
@@ -2530,7 +2639,7 @@ class FocusApp {
       for (let hour = 0; hour < 24; hour += 1) {
         const start = new Date(anchorDate.getFullYear(), anchorDate.getMonth(), anchorDate.getDate(), hour);
         const end = new Date(anchorDate.getFullYear(), anchorDate.getMonth(), anchorDate.getDate(), hour + 1);
-        buckets.push({ start, end, label: String(hour).padStart(2, "0") });
+        buckets.push({ start, end, label: String(hour).padStart(2, "0"), tip: `${String(hour).padStart(2, "0")}:00 – ${String((hour + 1) % 24).padStart(2, "0")}:00` });
       }
     } else if (this.selectedActivityRange === "weekly") {
       const startOfWeek = new Date(anchorDate);
@@ -2540,21 +2649,23 @@ class FocusApp {
         start.setDate(start.getDate() + day);
         const end = new Date(start);
         end.setDate(end.getDate() + 1);
-        buckets.push({ start, end, label: start.toLocaleDateString([], { weekday: "short" }) });
+        buckets.push({ start, end, label: start.toLocaleDateString([], { weekday: "short" }), tip: start.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" }) });
       }
     } else if (this.selectedActivityRange === "monthly") {
       const year = anchorDate.getFullYear();
       const month = anchorDate.getMonth();
       const days = new Date(year, month + 1, 0).getDate();
       for (let day = 1; day <= days; day += 1) {
-        buckets.push({ start: new Date(year, month, day), end: new Date(year, month, day + 1), label: String(day) });
+        const start = new Date(year, month, day);
+        buckets.push({ start, end: new Date(year, month, day + 1), label: String(day), tip: `${day}, ${start.toLocaleDateString([], { weekday: "short" })}` });
       }
     } else {
       for (let month = 0; month < 12; month += 1) {
         buckets.push({
           start: new Date(selectedYear, month, 1),
           end: new Date(selectedYear, month + 1, 1),
-          label: new Date(selectedYear, month, 1).toLocaleDateString([], { month: "short" })
+          label: new Date(selectedYear, month, 1).toLocaleDateString([], { month: "short" }),
+          tip: new Date(selectedYear, month, 1).toLocaleDateString([], { month: "long", year: "numeric" })
         });
       }
     }
@@ -2627,27 +2738,31 @@ class FocusApp {
       return d;
     };
 
+    // Domains are drawn as full lines, categories as dotted lines.
     const allPoints = [];
-    const series = this.selectedTrendCategories.map((catId, seriesIndex) => {
-      const info = this.seriesInfo(catId);
+    const gradients = [];
+    const shapes = this.selectedTrendCategories.map((key, seriesIndex) => {
+      const info = this.seriesInfo(key);
       if (!info) return "";
+      const dotted = key.startsWith("c:");
       const color = this.readableColor(info.color);
-      const points = categoryPoints[catId].map((point, index) => ({
-        x: left + (index / Math.max(1, categoryPoints[catId].length - 1)) * chartWidth,
+      const points = categoryPoints[key].map((point, index) => ({
+        x: left + (index / Math.max(1, categoryPoints[key].length - 1)) * chartWidth,
         y: baseline - (point.milliseconds / yMax) * chartHeight,
-        ms: point.milliseconds, label: point.label, name: info.name, color
+        ms: point.milliseconds, label: point.tip || point.label, name: info.name, color, dotted, key
       }));
       allPoints.push(...points);
       const line = curve(points);
-      const area = `${line} L${points[points.length - 1].x.toFixed(1)},${baseline} L${points[0].x.toFixed(1)},${baseline} Z`;
-      return `<linearGradient id="trend-fill-${seriesIndex}" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" stop-color="${color}" stop-opacity=".32"></stop><stop offset="1" stop-color="${color}" stop-opacity="0"></stop></linearGradient>
-        <path class="trend-area" d="${area}" fill="url(#trend-fill-${seriesIndex})"></path>
-        <path class="trend-line" d="${line}" pathLength="1" style="stroke:${color}"></path>`;
-    });
-    // gradients live in <defs>; shapes are drawn after the grid
-    const defs = series.map(markup => markup.match(/<linearGradient[\s\S]*?<\/linearGradient>/)?.[0] || "").join("");
-    const shapes = series.map(markup => markup.replace(/<linearGradient[\s\S]*?<\/linearGradient>/, "")).join("");
+      let area = "";
+      if (!dotted) {
+        const area_d = `${line} L${points[points.length - 1].x.toFixed(1)},${baseline} L${points[0].x.toFixed(1)},${baseline} Z`;
+        gradients.push(`<linearGradient id="trend-fill-${seriesIndex}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${color}" stop-opacity=".32"></stop><stop offset="1" stop-color="${color}" stop-opacity="0"></stop></linearGradient>`);
+        area = `<path class="trend-area" d="${area_d}" fill="url(#trend-fill-${seriesIndex})"></path>`;
+      }
+      const dots = points.map(p => `<circle class="trend-point" cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${dotted ? 2 : 2.4}" style="fill:${p.color}"></circle>`).join("");
+      return `<g class="trend-series" data-series="${this.escape(key)}">${area}<path class="trend-line${dotted ? " is-dotted" : ""}" d="${line}"${dotted ? "" : ' pathLength="1"'} style="stroke:${color}"></path>${dots}</g>`;
+    }).join("");
+    const defs = gradients.join("");
 
     // 7. Labels & axes
     const labelIndexes = new Set([0, Math.round((buckets.length - 1) / 4), Math.round((buckets.length - 1) / 2), Math.round((buckets.length - 1) * 3 / 4), buckets.length - 1]);
@@ -2675,7 +2790,6 @@ class FocusApp {
       const x = left + (index / Math.max(1, buckets.length - 1)) * chartWidth;
       return `<text class="trend-x-label" x="${x}" y="${height - 10}" text-anchor="middle">${this.escape(bucket.label)}</text>`;
     }).join("");
-    const dots = allPoints.map(p => `<circle class="trend-point" cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="2.4" style="fill:${p.color}"></circle>`).join("");
 
     // 8. Render. Only redraw (and replay the draw-in animation) when something actually changed.
     const html = `
@@ -2685,7 +2799,6 @@ class FocusApp {
           <defs>${defs}</defs>
           ${axis}
           ${shapes}
-          ${dots}
           ${xLabels}
           <line class="trend-guide" x1="0" y1="${top}" x2="0" y2="${baseline}"></line>
           <g class="trend-hover"><circle class="trend-halo" r="9"></circle><circle class="trend-focus" r="4.5"></circle></g>
@@ -2701,6 +2814,11 @@ class FocusApp {
     chart.innerHTML = html;
     chart.classList.toggle("is-animated", animate);
     this.bindTrendHover(chart, allPoints, { width, height });
+  }
+
+  // Little sample of a trend line: full for a domain, dotted for a category.
+  lineSwatch(color, dotted) {
+    return `<svg class="line-swatch" width="22" height="8" viewBox="0 0 22 8" aria-hidden="true"><line x1="1.5" y1="4" x2="20.5" y2="4" stroke="${this.escape(color)}" stroke-width="2.5" stroke-linecap="round"${dotted ? ' stroke-dasharray="0.01 6"' : ""}></line></svg>`;
   }
 
   // Hover: a guide line and a glowing dot glide to the nearest point; the label reuses the daily-target tip.
@@ -2721,13 +2839,13 @@ class FocusApp {
         if (distance < bestDistance) { best = point; bestDistance = distance; }
       });
       if (!best || bestDistance > 40) return hide();
-      const here = points.filter(p => Math.abs(p.x - best.x) < 0.5 && Math.abs(p.y - best.y) < 0.5);
+      const here = points.filter(p => Math.abs(p.x - best.x) < 0.5 && (p.ms > 0 || p === best)).sort((a, b) => b.ms - a.ms);
       hover.style.transform = `translate(${best.x}px, ${best.y}px)`;
       hover.style.setProperty("--hover-color", best.color);
       guide.style.transform = `translateX(${best.x}px)`;
       stage.classList.add("is-hovering");
       tip.innerHTML = `<span class="trend-tip-when">${this.escape(best.label)}</span>` + here.map(p =>
-        `<span class="trend-tip-row"><span class="dot" style="background:${p.color}"></span><b>${this.escape(p.name)}</b> ${this.escape(this.duration(p.ms))}</span>`).join("");
+        `<span class="trend-tip-row">${this.lineSwatch(p.color, p.dotted)}<b>${this.escape(p.name)}</b> ${this.escape(this.duration(p.ms))}</span>`).join("");
       tip.hidden = false;
       const stageBox = stage.getBoundingClientRect();
       const px = (best.x / width) * box.width + (box.left - stageBox.left);
@@ -2808,7 +2926,8 @@ class FocusApp {
     }).join("");
     const legend = selected.map(key => {
       const info = this.seriesInfo(key);
-      return `<span class="trend-legend-item"><span class="dot" style="background:${this.escape(this.readableColor(info.color))}"></span>${this.escape(key.startsWith("d:") ? `${info.name} (all)` : info.name)}</span>`;
+      const dotted = key.startsWith("c:");
+      return `<span class="trend-legend-item" tabindex="0" data-series="${this.escape(key)}" title="${dotted ? "Category (dotted line)" : "Domain (full line)"}">${this.lineSwatch(this.readableColor(info.color), dotted)}${this.escape(key.startsWith("d:") ? `${info.name} (all)` : info.name)}</span>`;
     }).join("");
 
     const html = `${presetHtml}|${viewHtml}|${addHtml}|${legend}`;
@@ -2817,6 +2936,16 @@ class FocusApp {
     const bar = this.elements.trendModeChips;
     bar.innerHTML = presetHtml + viewHtml + addHtml;
     this.elements.trendSeriesChips.innerHTML = legend;
+    // pointing at a legend item spotlights its line
+    const chart = this.elements.activityTrendChart;
+    const spotlight = key => {
+      chart.classList.toggle("is-dimming", Boolean(key));
+      chart.querySelectorAll(".trend-series").forEach(group => group.classList.toggle("is-hot", group.dataset.series === key));
+    };
+    this.elements.trendSeriesChips.querySelectorAll("[data-series]").forEach(item => {
+      item.onmouseenter = item.onfocus = () => spotlight(item.dataset.series);
+      item.onmouseleave = item.onblur = () => spotlight(null);
+    });
     const choose = preset => { this.trendPreset = preset; this.applyTrendPreset(preset, Date.now()); this.renderActivityTrend(); };
     bar.querySelectorAll("[data-trend-mode]").forEach(button => { button.onclick = () => choose(button.dataset.trendMode); });
     bar.querySelectorAll("[data-trend-view]").forEach(button => { button.onclick = () => choose(`v:${button.dataset.trendView}`); });
